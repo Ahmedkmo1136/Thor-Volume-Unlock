@@ -7,6 +7,9 @@ public final class AppSwitchAccessibilityService extends AccessibilityService {
 
     private static volatile boolean connected = false;
     private static volatile String lastRealPackage = null;
+    private Prefs prefs;
+    private int lastDispatchedGain = Integer.MIN_VALUE;
+    private boolean lastWasOverride = false;
 
     public static boolean isConnected() {
         return connected;
@@ -19,6 +22,7 @@ public final class AppSwitchAccessibilityService extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
+        prefs = new Prefs(this);
         connected = true;
     }
 
@@ -31,6 +35,8 @@ public final class AppSwitchAccessibilityService extends AccessibilityService {
         if (pkgSeq == null || pkgSeq.length() == 0) return;
 
         String pkg = pkgSeq.toString();
+        if (pkg.equals(lastRealPackage)) return;
+
         if (pkg.equals("com.android.systemui")
             || pkg.equals("android")
             || pkg.equals(getPackageName())
@@ -39,13 +45,22 @@ public final class AppSwitchAccessibilityService extends AccessibilityService {
             return;
         }
 
-        if (!pkg.equals(lastRealPackage)) {
-            lastRealPackage = pkg;
-            Prefs prefs = new Prefs(this);
-            if (prefs.isEnabled() && prefs.isPerAppOverridesEnabled()) {
-                AudioBoostService.notifyForegroundApp(this, pkg);
-            }
+        lastRealPackage = pkg;
+        if (prefs == null) prefs = new Prefs(this);
+        if (!prefs.isEnabled() || !prefs.isPerAppOverridesEnabled()) return;
+
+        int overrideDb = prefs.getPerAppGainDb(pkg);
+        boolean isOverride = overrideDb >= 0;
+        int effectiveGain = isOverride ? overrideDb : prefs.getGainDb();
+
+        // Skip waking the audio service if switching between two apps with identical gain
+        if (effectiveGain == lastDispatchedGain && isOverride == lastWasOverride && !isOverride) {
+            return;
         }
+        lastDispatchedGain = effectiveGain;
+        lastWasOverride = isOverride;
+
+        AudioBoostService.notifyForegroundApp(this, pkg);
     }
 
     @Override

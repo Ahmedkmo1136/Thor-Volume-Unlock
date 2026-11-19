@@ -17,11 +17,7 @@ public final class BoostTileService extends TileService {
         Prefs prefs = new Prefs(this);
         boolean next = !prefs.isEnabled();
         prefs.setEnabled(next);
-        if (next) {
-            AudioBoostService.startOrUpdate(this);
-        } else {
-            AudioBoostService.stopServiceNow(this);
-        }
+        AudioBoostService.startOrUpdate(this);
         sync();
     }
 
@@ -31,7 +27,8 @@ public final class BoostTileService extends TileService {
         Prefs prefs = new Prefs(this);
         boolean on = prefs.isEnabled();
         tile.setState(on ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
-        tile.setSubtitle(on ? ("+" + prefs.getGainDb() + " dB") : "Off");
+        tile.setLabel(on ? "Thor Boost" : "Thor Boost");
+        tile.setSubtitle(on ? ("ON (+" + prefs.getGainDb() + " dB)") : "OFF (Tap to enable)");
         tile.updateTile();
     }
 }

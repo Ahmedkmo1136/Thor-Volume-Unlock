@@ -5,15 +5,18 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
+import android.service.quicksettings.TileService;
 
 public final class AudioBoostService extends Service {
 
     public static final String ACTION_APPLY = "com.thor.audiounlocker.APPLY";
+    public static final String ACTION_TOGGLE = "com.thor.audiounlocker.TOGGLE";
     public static final String ACTION_STOP = "com.thor.audiounlocker.STOP";
     public static final String ACTION_APP_SWITCH = "com.thor.audiounlocker.APP_SWITCH";
     public static final String EXTRA_PACKAGE = "pkg";
@@ -30,6 +33,7 @@ public final class AudioBoostService extends Service {
 
     private Prefs prefs;
     private AudioBoostEngine engine;
+    private boolean inForeground = false;
 
     public static String getLastStatus() {
         return lastStatus;
@@ -40,22 +44,42 @@ public final class AudioBoostService extends Service {
     }
 
     public static void startOrUpdate(Context context) {
-        Intent i = new Intent(context, AudioBoostService.class);
-        i.setAction(ACTION_APPLY);
-        context.startForegroundService(i);
+        try {
+            Intent i = new Intent(context, AudioBoostService.class);
+            i.setAction(ACTION_APPLY);
+            context.startForegroundService(i);
+        } catch (Throwable ignored) {
+        }
     }
 
     public static void notifyForegroundApp(Context context, String pkg) {
-        Intent i = new Intent(context, AudioBoostService.class);
-        i.setAction(ACTION_APP_SWITCH);
-        i.putExtra(EXTRA_PACKAGE, pkg);
-        context.startForegroundService(i);
+        try {
+            Intent i = new Intent(context, AudioBoostService.class);
+            i.setAction(ACTION_APP_SWITCH);
+            i.putExtra(EXTRA_PACKAGE, pkg);
+            context.startForegroundService(i);
+        } catch (Throwable ignored) {
+        }
     }
 
     public static void stopServiceNow(Context context) {
-        Intent i = new Intent(context, AudioBoostService.class);
-        i.setAction(ACTION_STOP);
-        context.startService(i);
+        try {
+            Intent i = new Intent(context, AudioBoostService.class);
+            i.setAction(ACTION_STOP);
+            context.startService(i);
+        } catch (Throwable ignored) {
+        }
+        requestTileSync(context);
+    }
+
+    public static void requestTileSync(Context context) {
+        try {
+            TileService.requestListeningState(
+                context.getApplicationContext(),
+                new ComponentName(context.getApplicationContext(), BoostTileService.class)
+            );
+        } catch (Throwable ignored) {
+        }
     }
 
     @Override
@@ -65,33 +89,47 @@ public final class AudioBoostService extends Service {
         createChannel();
         engine = new AudioBoostEngine(this, prefs, (statusLine, active, bypassed) -> {
             lastStatus = statusLine;
-            updateNotification(statusLine);
+            if (inForeground) {
+                updateNotification(statusLine);
+            }
+            requestTileSync(this);
             StatusCallback cb = uiCallback;
             if (cb != null) {
                 cb.onStatusChanged(statusLine);
             }
         });
-        engine.start();
+        engine.startListening();
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+        String action = (intent != null) ? intent.getAction() : null;
+
+        if (ACTION_STOP.equals(action)) {
             prefs.setEnabled(false);
             engine.stop();
+            inForeground = false;
+            requestTileSync(this);
             stopForeground(STOP_FOREGROUND_REMOVE);
             stopSelf();
             return START_NOT_STICKY;
         }
 
-        Notification n = buildNotification(lastStatus);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
-        } else {
-            startForeground(NOTIF_ID, n);
+        if (ACTION_TOGGLE.equals(action)) {
+            prefs.setEnabled(!prefs.isEnabled());
         }
 
-        String pkg = (intent != null && ACTION_APP_SWITCH.equals(intent.getAction()))
+        if (!inForeground) {
+            Notification n = buildNotification(lastStatus);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+            } else {
+                startForeground(NOTIF_ID, n);
+            }
+            inForeground = true;
+        }
+
+        String pkg = ACTION_APP_SWITCH.equals(action)
             ? intent.getStringExtra(EXTRA_PACKAGE)
             : AppSwitchAccessibilityService.getLastRealPackage();
         engine.apply(pkg);
@@ -100,9 +138,11 @@ public final class AudioBoostService extends Service {
 
     @Override
     public void onDestroy() {
+        inForeground = false;
         if (engine != null) {
             engine.stop();
         }
+        requestTileSync(this);
         super.onDestroy();
     }
 
@@ -137,19 +177,28 @@ public final class AudioBoostService extends Service {
             new Intent(this, MainActivity.class),
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
         );
-        PendingIntent stopPi = PendingIntent.getService(
+        PendingIntent togglePi = PendingIntent.getForegroundService(
             this, 1,
+            new Intent(this, AudioBoostService.class).setAction(ACTION_TOGGLE),
+            PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
+        );
+        PendingIntent exitPi = PendingIntent.getService(
+            this, 2,
             new Intent(this, AudioBoostService.class).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
         );
 
+        boolean enabled = prefs != null && prefs.isEnabled();
+        String toggleLabel = enabled ? "Turn Off" : "Turn On";
+
         return new Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_speaker_boost)
-            .setContentTitle("Thor Audio Unlocker")
+            .setContentTitle(enabled ? "Thor Audio Unlocker (ON)" : "Thor Audio Unlocker (OFF)")
             .setContentText(statusText)
             .setContentIntent(openPi)
             .setOngoing(true)
-            .addAction(new Notification.Action.Builder(null, "Turn Off", stopPi).build())
+            .addAction(new Notification.Action.Builder(null, toggleLabel, togglePi).build())
+            .addAction(new Notification.Action.Builder(null, "Exit", exitPi).build())
             .build();
     }
 }
