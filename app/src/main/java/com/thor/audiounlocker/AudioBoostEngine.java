@@ -80,32 +80,24 @@ public final class AudioBoostEngine {
             return;
         }
 
-        int gainDb;
-        String scopeLabel;
-
-        if (prefs.isPerAppMode()) {
-            int appDb = prefs.getPerAppGainDb(this.currentForegroundPkg);
-            if (appDb < 0) {
-                releaseAll();
-                String waitingOn = (this.currentForegroundPkg == null)
-                    ? "Waiting for selected app"
-                    : ("Standby (" + shortPkgName(this.currentForegroundPkg) + ")");
-                notifyListener(waitingOn, false, true);
-                return;
+        // Resolve non-conflicting gain: per-app override replaces Global dB when active
+        int gainDb = prefs.getGainDb();
+        String scopeLabel = "Global";
+        if (prefs.isPerAppOverridesEnabled() && this.currentForegroundPkg != null) {
+            int overrideDb = prefs.getPerAppGainDb(this.currentForegroundPkg);
+            if (overrideDb >= 0) {
+                gainDb = overrideDb;
+                scopeLabel = prefs.getPerAppLabel(this.currentForegroundPkg);
             }
-            gainDb = appDb;
-            scopeLabel = "[" + prefs.getPerAppLabel(this.currentForegroundPkg) + "] ";
-        } else {
-            gainDb = prefs.getGainDb();
-            scopeLabel = "";
         }
 
         boolean limiterOn = prefs.isLimiterEnabled();
         boolean eqOn = prefs.isEqEnabled();
+        String eqProfile = prefs.getEqProfile();
         boolean wideOn = prefs.isStereoWideEnabled();
         int widthPct = prefs.getStageWidthPercent();
 
-        boolean dpOk = applyDynamicsProcessing(gainDb, limiterOn, eqOn, wideOn, widthPct);
+        boolean dpOk = applyDynamicsProcessing(gainDb, limiterOn, eqOn, eqProfile, wideOn, widthPct);
         boolean virtOk = wideOn && widthPct > 0 && applyVirtualizer(widthPct);
         if (!wideOn || widthPct == 0) {
             releaseVirtualizer();
@@ -113,35 +105,33 @@ public final class AudioBoostEngine {
 
         if (dpOk) {
             releaseLoudnessEnhancer();
-            String stageNote = wideOn ? (" • Stage " + widthPct + "%" + (virtOk ? " (Virt+EQ)" : " (Stereo EQ)")) : "";
-            notifyListener("Active " + scopeLabel + "+" + gainDb + " dB" + stageNote, true, false);
+            String eqTag = eqOn ? (Prefs.PROFILE_JOEY.equals(eqProfile) ? " • Joey EQ" : " • Custom EQ") : "";
+            String stageTag = wideOn ? (" • Stage " + widthPct + "%") : "";
+            notifyListener("[" + scopeLabel + "] +" + gainDb + " dB" + eqTag + stageTag, true, false);
         } else {
             boolean leOk = applyLoudnessEnhancer(gainDb * 100);
             if (leOk) {
-                notifyListener("Active " + scopeLabel + "+" + gainDb + " dB (Fallback)", true, false);
+                notifyListener("[" + scopeLabel + "] +" + gainDb + " dB (Fallback)", true, false);
             } else {
                 notifyListener("Error: Android rejected global audio effect", false, false);
             }
         }
     }
 
-    private String shortPkgName(String pkg) {
-        int idx = pkg.lastIndexOf('.');
-        return (idx >= 0 && idx + 1 < pkg.length()) ? pkg.substring(idx + 1) : pkg;
-    }
-
     private boolean applyDynamicsProcessing(
         int gainDb,
         boolean limiterOn,
         boolean eqOn,
+        String eqProfile,
         boolean wideOn,
         int widthPct
     ) {
         try {
             releaseDynamicsProcessing();
 
+            boolean isJoey = eqOn && Prefs.PROFILE_JOEY.equals(eqProfile);
             boolean usePostEq = eqOn || (wideOn && widthPct > 0);
-            int bandCount = Prefs.EQ_CUTOFFS_HZ.length;
+            int bandCount = isJoey ? Prefs.JOEY_FREQS_HZ.length : Prefs.EQ_CUTOFFS_HZ.length;
 
             DynamicsProcessing.Config.Builder b = new DynamicsProcessing.Config.Builder(
                 DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION,
@@ -152,26 +142,39 @@ public final class AudioBoostEngine {
                 limiterOn
             );
             b.setPreferredFrameDuration(10.0f);
-            b.setInputGainAllChannelsTo((float) gainDb);
+
+            // Apply makeup gain when Joey's deeply carved mid-range EQ curve is active
+            float totalInputGain = (float) gainDb + (isJoey ? Prefs.JOEY_MAKEUP_DB : 0.0f);
+            b.setInputGainAllChannelsTo(totalInputGain);
 
             if (usePostEq) {
                 float tilt = (wideOn && widthPct > 0) ? (widthPct / 100.0f) * 2.0f : 0.0f;
-
                 DynamicsProcessing.Eq eqLeft = new DynamicsProcessing.Eq(true, true, bandCount);
                 DynamicsProcessing.Eq eqRight = new DynamicsProcessing.Eq(true, true, bandCount);
 
-                for (int i = 0; i < bandCount; i++) {
-                    float base = eqOn ? (float) prefs.getEqBandDb(i) : 0.0f;
-                    float leftOffset = 0.0f;
-                    if (i == 2) leftOffset = +tilt;
-                    else if (i == 3) leftOffset = -tilt;
-                    else if (i == 4) leftOffset = +tilt;
+                if (isJoey) {
+                    for (int i = 0; i < bandCount; i++) {
+                        float freq = Prefs.JOEY_FREQS_HZ[i];
+                        float base = Prefs.JOEY_GAINS_DB[i];
+                        float leftOffset = 0.0f;
+                        if (freq >= 850f && freq <= 1860f) leftOffset = +tilt * 0.75f;
+                        else if (freq >= 2800f && freq <= 5000f) leftOffset = -tilt * 0.75f;
+                        else if (freq >= 9050f) leftOffset = +tilt * 0.75f;
 
-                    float leftGain = clamp(base + leftOffset, -15f, 15f);
-                    float rightGain = clamp(base - leftOffset, -15f, 15f);
+                        eqLeft.setBand(i, new DynamicsProcessing.EqBand(true, freq, clamp(base + leftOffset, -36f, 15f)));
+                        eqRight.setBand(i, new DynamicsProcessing.EqBand(true, freq, clamp(base - leftOffset, -36f, 15f)));
+                    }
+                } else {
+                    for (int i = 0; i < bandCount; i++) {
+                        float base = eqOn ? (float) prefs.getEqBandDb(i) : 0.0f;
+                        float leftOffset = 0.0f;
+                        if (i == 2) leftOffset = +tilt;
+                        else if (i == 3) leftOffset = -tilt;
+                        else if (i == 4) leftOffset = +tilt;
 
-                    eqLeft.setBand(i, new DynamicsProcessing.EqBand(true, Prefs.EQ_CUTOFFS_HZ[i], leftGain));
-                    eqRight.setBand(i, new DynamicsProcessing.EqBand(true, Prefs.EQ_CUTOFFS_HZ[i], rightGain));
+                        eqLeft.setBand(i, new DynamicsProcessing.EqBand(true, Prefs.EQ_CUTOFFS_HZ[i], clamp(base + leftOffset, -15f, 15f)));
+                        eqRight.setBand(i, new DynamicsProcessing.EqBand(true, Prefs.EQ_CUTOFFS_HZ[i], clamp(base - leftOffset, -15f, 15f)));
+                    }
                 }
 
                 b.setPostEqByChannelIndex(0, eqLeft);
@@ -179,8 +182,11 @@ public final class AudioBoostEngine {
             }
 
             if (limiterOn) {
+                // Joey's guide uses 500 ms limiter release and ~0 dB threshold
+                float releaseMs = isJoey ? 500.0f : 60.0f;
+                float thresholdDb = isJoey ? -0.1f : -0.5f;
                 DynamicsProcessing.Limiter lim = new DynamicsProcessing.Limiter(
-                    true, true, 0, 1.0f, 50.0f, 10.0f, -0.5f, 0.0f
+                    true, true, 0, 1.0f, releaseMs, 10.0f, thresholdDb, 0.0f
                 );
                 b.setLimiterAllChannelsTo(lim);
             }

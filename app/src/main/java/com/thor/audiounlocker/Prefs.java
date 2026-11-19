@@ -15,6 +15,24 @@ public final class Prefs {
     public static final int EQ_MIN_DB = -12;
     public static final int EQ_MAX_DB = 12;
 
+    public static final String PROFILE_JOEY = "joey";
+    public static final String PROFILE_WIDE = "wide";
+    public static final String PROFILE_VOCAL = "vocal";
+    public static final String PROFILE_FLAT = "flat";
+    public static final String PROFILE_CUSTOM = "custom";
+
+    // Exact 19-band curve from Joey's Retro Handhelds AYN Thor audio guide (Amphi EQ)
+    public static final float[] JOEY_FREQS_HZ = {
+        70f, 110f, 120f, 200f, 300f, 444f, 600f, 700f, 850f,
+        1200f, 1860f, 2800f, 3800f, 5000f, 7000f, 9050f, 11000f, 12000f, 16000f
+    };
+    public static final float[] JOEY_GAINS_DB = {
+        -32.0f, -4.5f, -4.0f, -4.0f, -5.0f, -9.0f, -13.5f, -17.0f, -17.0f,
+        -18.5f, -20.0f, -19.5f, -21.5f, -13.0f, -6.0f, -0.5f, 0.5f, -0.5f, -3.0f
+    };
+    // Makeup gain so Joey's deeply carved mid-range curve stays full volume at normal slider levels
+    public static final float JOEY_MAKEUP_DB = 11.0f;
+
     public static final float[] EQ_CUTOFFS_HZ = { 90f, 300f, 1000f, 3800f, 14000f };
     public static final String[] EQ_LABELS = {
         "60 Hz (Sub-Bass)",
@@ -25,7 +43,7 @@ public final class Prefs {
     };
     private static final int[] DEFAULT_EQ_DB = { -2, 1, 2, 3, 2 };
 
-    private static final String NAME = "thor_boost_prefs_v3";
+    private static final String NAME = "thor_boost_prefs_v5";
     private static final String KEY_PER_APP_PKGS = "per_app_packages";
     private final SharedPreferences sp;
 
@@ -65,8 +83,9 @@ public final class Prefs {
         return isExtraGainUnlocked() ? EXTRA_MAX_DB : SAFE_MAX_DB;
     }
 
+    // Global baseline gain applied to all apps that do not have a per-app override
     public int getGainDb() {
-        int val = sp.getInt("gain_db", 8);
+        int val = sp.getInt("gain_db", 4);
         return Math.max(0, Math.min(getCurrentMaxDb(), val));
     }
 
@@ -75,13 +94,13 @@ public final class Prefs {
         sp.edit().putInt("gain_db", clamped).apply();
     }
 
-    // --- Per-App Gain Settings ---
-    public boolean isPerAppMode() {
-        return sp.getBoolean("per_app_mode", false);
+    // --- Per-App Overrides (replaces Global dB for listed apps without conflict) ---
+    public boolean isPerAppOverridesEnabled() {
+        return sp.getBoolean("per_app_overrides_enabled", true);
     }
 
-    public void setPerAppMode(boolean v) {
-        sp.edit().putBoolean("per_app_mode", v).apply();
+    public void setPerAppOverridesEnabled(boolean v) {
+        sp.edit().putBoolean("per_app_overrides_enabled", v).apply();
     }
 
     public List<String> getPerAppPackages() {
@@ -128,7 +147,15 @@ public final class Prefs {
         return sp.getString("per_app_label_" + pkg, pkg);
     }
 
-    // --- Stereo Stage & EQ ---
+    // --- EQ Profile & Stereo Stage ---
+    public String getEqProfile() {
+        return sp.getString("eq_profile", PROFILE_JOEY);
+    }
+
+    public void setEqProfile(String profile) {
+        sp.edit().putString("eq_profile", profile).apply();
+    }
+
     public boolean isStereoWideEnabled() {
         return sp.getBoolean("stereo_wide_enabled", true);
     }
@@ -138,7 +165,7 @@ public final class Prefs {
     }
 
     public int getStageWidthPercent() {
-        int v = sp.getInt("stage_width_pct", 65);
+        int v = sp.getInt("stage_width_pct", 80);
         return Math.max(0, Math.min(100, v));
     }
 

@@ -43,7 +43,7 @@ public final class AppSwitchAccessibilityService extends AccessibilityService {
         if (!pkg.equals(lastRealPackage)) {
             lastRealPackage = pkg;
             Prefs prefs = new Prefs(this);
-            if (prefs.isEnabled() && prefs.isPerAppMode()) {
+            if (prefs.isEnabled() && prefs.isPerAppOverridesEnabled()) {
                 AudioBoostService.notifyForegroundApp(this, pkg);
             }
         }

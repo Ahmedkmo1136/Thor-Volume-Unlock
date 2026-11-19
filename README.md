@@ -1,10 +1,10 @@
-# Thor Audio Unlocker v4 (Per-App Gain + Stereo Stage EQ)
-THIS IS APP IS FULLY VIBECODED , I HAVE NO KNOWLEDGE OF CODING AT ALL. IT WAS MADE BECAUSE JAMESDSP CAUSES ISSUES WITH RAM IN DROIDDECK.
+# Thor Audio Unlocker v5
 
-Ultra-lightweight Android speaker boost + per-app gain + stereo stage widener for the **AYN Thor** (zero external dependencies, ~100 KB APK, minimal RAM).
+Ultra-lightweight Android speaker boost, per-app gain override, and stereo stage equalizer for the **AYN Thor** (zero external dependencies, ~100 KB APK, minimal RAM).
 
-## What's New in v4
-- **Per-App Gain Mode**: Tap **+ Add App**, pick game/emulator, set its exact dB slider, and enable **Per-App Boost Only** so all other apps stay at 0 dB standby.
-- **Event-Driven App Switcher**: Uses a minimal `TYPE_WINDOW_STATE_CHANGED` Accessibility Service (`canRetrieveWindowContent="false"`) for 0% CPU overhead during gameplay.
-- **0 to +10 dB Safe Gain** + **Extra dB Mode (Up to +20 dB)** with danger warning.
-- **Stereo Stage Widener (0–100%)** + **5-Band Equalizer** + **Output Limiter (-0.5 dB)**.
+## Features
+- **Global dB + Non-Conflicting Per-App Overrides**: Set a default Global dB (e.g. `+2 dB`) for all apps, and add custom per-app overrides (e.g. `+10 dB` for any specific app). Listed apps automatically replace Global dB while in the foreground and revert cleanly when you switch back.
+- **Guided Accessibility Setup**: Clearly prompts you to enable **Thor Audio Per-App Switcher** in Android Accessibility Settings (`TYPE_WINDOW_STATE_CHANGED` only, 0% CPU during gameplay) before adding per-app overrides.
+- **Joey's Retro Handhelds Thor Profile**: Built-in 19-band EQ curve (`70 Hz` – `16 kHz`) + `500 ms` limiter release + wide stereo stage based on Joey's Retro Handhelds AYN Thor audio guide, plus customizable **5-Band EQ** (`Wide Stage`, `Vocal Clear`, `Flat`, and `Custom`).
+- **Safe 0 to +10 dB Slider** + **Extra dB Mode (Up to +20 dB)** with a distortion/speaker danger warning.
+- **Auto-Start on Boot**, **Auto-Bypass on Headphones/Bluetooth**, and **Quick Settings Tile**.

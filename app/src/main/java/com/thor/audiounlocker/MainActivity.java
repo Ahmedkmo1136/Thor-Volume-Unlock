@@ -33,8 +33,10 @@ public final class MainActivity extends Activity {
     private TextView gainValueView;
     private TextView gainRangeHint;
     private SeekBar gainSlider;
-    private TextView accStatusView;
+    private TextView accBannerView;
+    private Button addAppBtn;
     private LinearLayout perAppListContainer;
+    private TextView activeProfileView;
     private TextView widthValueView;
     private SeekBar widthSlider;
     private final SeekBar[] eqSliders = new SeekBar[Prefs.EQ_CUTOFFS_HZ.length];
@@ -63,7 +65,7 @@ public final class MainActivity extends Activity {
         if (statusView != null) {
             statusView.setText(AudioBoostService.getLastStatus());
         }
-        updateAccessibilityStatus();
+        updateAccessibilityUi();
         rebuildPerAppList();
         AudioBoostService.setStatusCallback(text -> runOnUiThread(() -> {
             if (statusView != null) statusView.setText(text);
@@ -101,7 +103,7 @@ public final class MainActivity extends Activity {
         statusView.setPadding(0, dp(4), 0, dp(14));
         root.addView(statusView);
 
-        // 1. Global Gain Card (0-10 dB safe, optional 20 dB danger toggle)
+        // 1. Global Gain Card (baseline for all apps)
         LinearLayout gainCard = makeCard();
         root.addView(gainCard);
 
@@ -110,7 +112,7 @@ public final class MainActivity extends Activity {
         gainCard.addView(gainHeader);
 
         TextView gainLabel = new TextView(this);
-        gainLabel.setText("Global Speaker Gain");
+        gainLabel.setText("Global dB (Default for All Apps)");
         gainLabel.setTextColor(Color.WHITE);
         gainLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         gainLabel.setTypeface(null, Typeface.BOLD);
@@ -165,12 +167,12 @@ public final class MainActivity extends Activity {
             }
         );
 
-        // 2. Per-App Gain Card
+        // 2. Per-App Overrides Card (replaces Global dB for specific apps without conflict)
         LinearLayout perAppCard = makeCard();
         root.addView(perAppCard);
 
         TextView perAppTitle = new TextView(this);
-        perAppTitle.setText("Per-App Gain (e.g. DroidDeck Only)");
+        perAppTitle.setText("Per-App dB Overrides");
         perAppTitle.setTextColor(Color.WHITE);
         perAppTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         perAppTitle.setTypeface(null, Typeface.BOLD);
@@ -179,66 +181,129 @@ public final class MainActivity extends Activity {
 
         addSwitchRow(
             perAppCard,
-            "Per-App Boost Only",
-            "ON = boosts ONLY apps listed below (0 dB standby for all other apps)",
+            "Enable Per-App Overrides",
+            "Listed apps use their own dB below; all other apps use Global dB above (no conflict).",
             Color.parseColor("#94A3B8"),
-            prefs.isPerAppMode(),
+            prefs.isPerAppOverridesEnabled(),
             checked -> {
-                prefs.setPerAppMode(checked);
+                prefs.setPerAppOverridesEnabled(checked);
                 pushServiceUpdate();
             }
         );
 
-        accStatusView = new TextView(this);
-        accStatusView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        accStatusView.setPadding(0, dp(2), 0, dp(8));
-        perAppCard.addView(accStatusView);
-        updateAccessibilityStatus();
+        // Clear Accessibility requirement banner
+        accBannerView = new TextView(this);
+        accBannerView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        accBannerView.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams bannerLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        bannerLp.topMargin = dp(4);
+        bannerLp.bottomMargin = dp(10);
+        accBannerView.setLayoutParams(bannerLp);
+        perAppCard.addView(accBannerView);
 
         LinearLayout perAppBtnRow = new LinearLayout(this);
         perAppBtnRow.setOrientation(LinearLayout.HORIZONTAL);
         perAppCard.addView(perAppBtnRow);
 
-        Button addAppBtn = new Button(this);
-        addAppBtn.setText("+ Add App");
+        Button accBtn = new Button(this);
+        accBtn.setText("1. Enable Accessibility");
+        accBtn.setAllCaps(false);
+        accBtn.setTextColor(Color.WHITE);
+        accBtn.setBackground(makeRoundedBg("#1E293B", 10));
+        LinearLayout.LayoutParams lpAcc = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        lpAcc.rightMargin = dp(6);
+        accBtn.setLayoutParams(lpAcc);
+        accBtn.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+        perAppBtnRow.addView(accBtn);
+
+        addAppBtn = new Button(this);
+        addAppBtn.setText("2. + Add App");
         addAppBtn.setAllCaps(false);
         addAppBtn.setTextColor(Color.parseColor("#0B1120"));
         addAppBtn.setTypeface(null, Typeface.BOLD);
         addAppBtn.setBackground(makeRoundedBg("#38BDF8", 10));
-        LinearLayout.LayoutParams lpAdd = new LinearLayout.LayoutParams(0, dp(40), 1f);
-        lpAdd.rightMargin = dp(6);
+        LinearLayout.LayoutParams lpAdd = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        lpAdd.leftMargin = dp(6);
         addAppBtn.setLayoutParams(lpAdd);
-        addAppBtn.setOnClickListener(v -> showAppPickerDialog());
-        perAppBtnRow.addView(addAppBtn);
+        addAppBtn.setOnClickListener(v -> {
+            if (!AppSwitchAccessibilityService.isConnected()) {
+                new AlertDialog.Builder(this)
+                    .setTitle("Enable Accessibility First")
+                    .setMessage("To use per-app dB overrides, turn on 'Thor Audio Per-App Switcher' in Android Accessibility Settings first.
 
-        Button accBtn = new Button(this);
-        accBtn.setText("Accessibility Settings");
-        accBtn.setAllCaps(false);
-        accBtn.setTextColor(Color.WHITE);
-        accBtn.setBackground(makeRoundedBg("#1E293B", 10));
-        LinearLayout.LayoutParams lpAcc = new LinearLayout.LayoutParams(0, dp(40), 1f);
-        lpAcc.leftMargin = dp(6);
-        accBtn.setLayoutParams(lpAcc);
-        accBtn.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
-        perAppBtnRow.addView(accBtn);
+It only listens for app switches (0% CPU during gameplay).")
+                    .setPositiveButton("Open Accessibility Settings", (d, w) ->
+                        startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)))
+                    .setNegativeButton("Cancel", null)
+                    .show();
+            } else {
+                showAppPickerDialog();
+            }
+        });
+        perAppBtnRow.addView(addAppBtn);
 
         perAppListContainer = new LinearLayout(this);
         perAppListContainer.setOrientation(LinearLayout.VERTICAL);
         perAppListContainer.setPadding(0, dp(10), 0, 0);
         perAppCard.addView(perAppListContainer);
+        updateAccessibilityUi();
         rebuildPerAppList();
 
-        // 3. Stereo Stage Widener & 5-Band EQ Card
+        // 3. Stereo Stage Widener & Equalizer Profiles Card
         LinearLayout eqCard = makeCard();
         root.addView(eqCard);
 
         TextView eqTitle = new TextView(this);
-        eqTitle.setText("Stereo Stage & 5-Band Equalizer");
+        eqTitle.setText("Equalizer Profiles & Stereo Stage");
         eqTitle.setTextColor(Color.WHITE);
         eqTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         eqTitle.setTypeface(null, Typeface.BOLD);
-        eqTitle.setPadding(0, 0, 0, dp(8));
+        eqTitle.setPadding(0, 0, 0, dp(4));
         eqCard.addView(eqTitle);
+
+        activeProfileView = new TextView(this);
+        activeProfileView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        activeProfileView.setTextColor(Color.parseColor("#38BDF8"));
+        activeProfileView.setPadding(0, 0, 0, dp(8));
+        updateActiveProfileLabel();
+        eqCard.addView(activeProfileView);
+
+        // Joey's Profile featured button
+        Button joeyBtn = new Button(this);
+        joeyBtn.setText("Load Joey's Retro Handhelds Profile (19-Band Thor EQ)");
+        joeyBtn.setAllCaps(false);
+        joeyBtn.setTextColor(Color.parseColor("#0B1120"));
+        joeyBtn.setTypeface(null, Typeface.BOLD);
+        joeyBtn.setBackground(makeRoundedBg("#38BDF8", 10));
+        LinearLayout.LayoutParams joeyLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(42)
+        );
+        joeyLp.bottomMargin = dp(8);
+        joeyBtn.setLayoutParams(joeyLp);
+        joeyBtn.setOnClickListener(v -> {
+            prefs.setEqEnabled(true);
+            prefs.setEqProfile(Prefs.PROFILE_JOEY);
+            prefs.setStereoWideEnabled(true);
+            prefs.setStageWidthPercent(80);
+            prefs.setLimiterEnabled(true);
+            if (widthSlider != null) widthSlider.setProgress(80);
+            if (widthValueView != null) widthValueView.setText("80%");
+            updateActiveProfileLabel();
+            pushServiceUpdate();
+        });
+        eqCard.addView(joeyBtn);
+
+        // Quick 5-band presets
+        LinearLayout eqPresets = new LinearLayout(this);
+        eqPresets.setOrientation(LinearLayout.HORIZONTAL);
+        eqPresets.setPadding(0, 0, 0, dp(10));
+        eqCard.addView(eqPresets);
+
+        addPresetBtn(eqPresets, "Wide Stage", Prefs.PROFILE_WIDE, new int[]{-2, 1, 2, 3, 3}, 75);
+        addPresetBtn(eqPresets, "Vocal Clear", Prefs.PROFILE_VOCAL, new int[]{-3, 0, 4, 3, 1}, 50);
+        addPresetBtn(eqPresets, "Flat", Prefs.PROFILE_FLAT, new int[]{0, 0, 0, 0, 0}, 0);
 
         addSwitchRow(
             eqCard,
@@ -290,8 +355,8 @@ public final class MainActivity extends Activity {
 
         addSwitchRow(
             eqCard,
-            "5-Band Equalizer",
-            "Shape bass, vocals, presence, and air (-12 to +12 dB)",
+            "Enable Equalizer",
+            "Adjusting any slider below switches to Custom 5-Band EQ",
             Color.parseColor("#94A3B8"),
             prefs.isEqEnabled(),
             checked -> {
@@ -299,15 +364,6 @@ public final class MainActivity extends Activity {
                 pushServiceUpdate();
             }
         );
-
-        LinearLayout eqPresets = new LinearLayout(this);
-        eqPresets.setOrientation(LinearLayout.HORIZONTAL);
-        eqPresets.setPadding(0, dp(6), 0, dp(10));
-        eqCard.addView(eqPresets);
-
-        addPresetBtn(eqPresets, "Wide Stage", new int[]{-2, 1, 2, 3, 3}, 75);
-        addPresetBtn(eqPresets, "Vocal Clear", new int[]{-3, 0, 4, 3, 1}, 50);
-        addPresetBtn(eqPresets, "Flat", new int[]{0, 0, 0, 0, 0}, 0);
 
         for (int i = 0; i < Prefs.EQ_CUTOFFS_HZ.length; i++) {
             final int bandIndex = i;
@@ -342,7 +398,9 @@ public final class MainActivity extends Activity {
                     int db = progress + Prefs.EQ_MIN_DB;
                     bandVal.setText(formatSignedDb(db));
                     if (fromUser) {
+                        prefs.setEqProfile(Prefs.PROFILE_CUSTOM);
                         prefs.setEqBandDb(bandIndex, db);
+                        updateActiveProfileLabel();
                         pushServiceUpdate();
                     }
                 }
@@ -363,7 +421,7 @@ public final class MainActivity extends Activity {
                 pushServiceUpdate();
             });
 
-        addSwitchRow(settingsCard, "Output Limiter (-0.5 dB)", "Keeps loudness clean and prevents harsh digital clipping",
+        addSwitchRow(settingsCard, "Output Limiter", "Keeps loudness clean and prevents harsh digital clipping",
             Color.parseColor("#94A3B8"), prefs.isLimiterEnabled(), checked -> {
                 prefs.setLimiterEnabled(checked);
                 pushServiceUpdate();
@@ -375,7 +433,7 @@ public final class MainActivity extends Activity {
                 pushServiceUpdate();
             });
 
-        addSwitchRow(settingsCard, "Auto-Start on Boot", "Starts automatically when your AYN Thor boots",
+        addSwitchRow(settingsCard, "Auto-Start on Boot", "Starts automatically when your device boots",
             Color.parseColor("#94A3B8"), prefs.isStartOnBoot(), prefs::setStartOnBoot);
 
         Button closeBtn = new Button(this);
@@ -398,14 +456,35 @@ public final class MainActivity extends Activity {
         return scroll;
     }
 
-    private void updateAccessibilityStatus() {
-        if (accStatusView == null) return;
-        if (AppSwitchAccessibilityService.isConnected()) {
-            accStatusView.setText("Per-App Switcher: Connected (0% CPU during gameplay)");
-            accStatusView.setTextColor(Color.parseColor("#4ADE80"));
+    private void updateActiveProfileLabel() {
+        if (activeProfileView == null) return;
+        String p = prefs.getEqProfile();
+        if (Prefs.PROFILE_JOEY.equals(p)) {
+            activeProfileView.setText("Active Profile: Joey's Retro Handhelds (19-Band Thor EQ + 500ms Limiter)");
+        } else if (Prefs.PROFILE_WIDE.equals(p)) {
+            activeProfileView.setText("Active Profile: Wide Stage (5-Band EQ)");
+        } else if (Prefs.PROFILE_VOCAL.equals(p)) {
+            activeProfileView.setText("Active Profile: Vocal Clear (5-Band EQ)");
+        } else if (Prefs.PROFILE_FLAT.equals(p)) {
+            activeProfileView.setText("Active Profile: Flat (0 dB EQ)");
         } else {
-            accStatusView.setText("Per-App Switcher: Not enabled — tap Accessibility Settings and turn on 'Thor Audio Per-App Switcher'");
-            accStatusView.setTextColor(Color.parseColor("#FBBF24"));
+            activeProfileView.setText("Active Profile: Custom 5-Band EQ");
+        }
+    }
+
+    private void updateAccessibilityUi() {
+        if (accBannerView == null || addAppBtn == null) return;
+        boolean connected = AppSwitchAccessibilityService.isConnected();
+        if (connected) {
+            accBannerView.setText("Step 1 Complete: Accessibility Connected (0% CPU during gameplay). You can now add per-app dB overrides.");
+            accBannerView.setTextColor(Color.parseColor("#4ADE80"));
+            accBannerView.setBackground(makeRoundedBg("#0F291E", 10));
+            addAppBtn.setAlpha(1.0f);
+        } else {
+            accBannerView.setText("REQUIRED FIRST: Tap '1. Enable Accessibility' and turn on 'Thor Audio Per-App Switcher' before adding per-app dB overrides.");
+            accBannerView.setTextColor(Color.parseColor("#FBBF24"));
+            accBannerView.setBackground(makeRoundedBg("#2A1F0B", 10));
+            addAppBtn.setAlpha(0.45f);
         }
     }
 
@@ -416,7 +495,7 @@ public final class MainActivity extends Activity {
         List<String> pkgs = prefs.getPerAppPackages();
         if (pkgs.isEmpty()) {
             TextView empty = new TextView(this);
-            empty.setText("No apps added yet. Tap '+ Add App' to select DroidDeck or any game.");
+            empty.setText("No per-app overrides added. All apps currently use Global dB (+" + prefs.getGainDb() + " dB).");
             empty.setTextColor(Color.parseColor("#64748B"));
             empty.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
             perAppListContainer.addView(empty);
@@ -518,12 +597,12 @@ public final class MainActivity extends Activity {
         }
 
         new AlertDialog.Builder(this)
-            .setTitle("Select App to Boost")
+            .setTitle("Select App for Custom dB")
             .setItems(items, (dialog, which) -> {
                 String label = apps.get(which)[0];
                 String pkg = apps.get(which)[1];
                 prefs.setPerAppGain(pkg, label, Math.min(prefs.getCurrentMaxDb(), 8));
-                prefs.setPerAppMode(true);
+                prefs.setPerAppOverridesEnabled(true);
                 rebuildPerAppList();
                 pushServiceUpdate();
             })
@@ -531,7 +610,7 @@ public final class MainActivity extends Activity {
             .show();
     }
 
-    private void addPresetBtn(LinearLayout row, String label, int[] bands, int widthPct) {
+    private void addPresetBtn(LinearLayout row, String label, String profileId, int[] bands, int widthPct) {
         Button b = new Button(this);
         b.setText(label);
         b.setAllCaps(false);
@@ -542,6 +621,8 @@ public final class MainActivity extends Activity {
         lp.setMargins(dp(4), 0, dp(4), 0);
         b.setLayoutParams(lp);
         b.setOnClickListener(v -> {
+            prefs.setEqEnabled(true);
+            prefs.setEqProfile(profileId);
             for (int i = 0; i < bands.length; i++) {
                 prefs.setEqBandDb(i, bands[i]);
                 if (eqSliders[i] != null) eqSliders[i].setProgress(bands[i] - Prefs.EQ_MIN_DB);
@@ -550,6 +631,7 @@ public final class MainActivity extends Activity {
             prefs.setStageWidthPercent(widthPct);
             if (widthSlider != null) widthSlider.setProgress(widthPct);
             if (widthValueView != null) widthValueView.setText(widthPct + "%");
+            updateActiveProfileLabel();
             pushServiceUpdate();
         });
         row.addView(b);
@@ -567,7 +649,7 @@ public final class MainActivity extends Activity {
             gainRangeHint.setText("Range: 0 to +20 dB (DANGER ZONE UNLOCKED above +10 dB)");
             gainRangeHint.setTextColor(Color.parseColor("#F87171"));
         } else {
-            gainRangeHint.setText("Safe Range: 0 to +10 dB (Recommended: +6 to +9 dB)");
+            gainRangeHint.setText("Safe Range: 0 to +10 dB (applies to any app without a per-app override)");
             gainRangeHint.setTextColor(Color.parseColor("#94A3B8"));
         }
     }
