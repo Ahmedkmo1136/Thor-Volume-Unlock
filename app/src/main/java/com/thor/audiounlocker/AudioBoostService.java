@@ -15,6 +15,9 @@ public final class AudioBoostService extends Service {
 
     public static final String ACTION_APPLY = "com.thor.audiounlocker.APPLY";
     public static final String ACTION_STOP = "com.thor.audiounlocker.STOP";
+    public static final String ACTION_APP_SWITCH = "com.thor.audiounlocker.APP_SWITCH";
+    public static final String EXTRA_PACKAGE = "pkg";
+
     private static final String CHANNEL_ID = "thor_boost_channel";
     private static final int NOTIF_ID = 1001;
 
@@ -39,6 +42,13 @@ public final class AudioBoostService extends Service {
     public static void startOrUpdate(Context context) {
         Intent i = new Intent(context, AudioBoostService.class);
         i.setAction(ACTION_APPLY);
+        context.startForegroundService(i);
+    }
+
+    public static void notifyForegroundApp(Context context, String pkg) {
+        Intent i = new Intent(context, AudioBoostService.class);
+        i.setAction(ACTION_APP_SWITCH);
+        i.putExtra(EXTRA_PACKAGE, pkg);
         context.startForegroundService(i);
     }
 
@@ -81,7 +91,10 @@ public final class AudioBoostService extends Service {
             startForeground(NOTIF_ID, n);
         }
 
-        engine.apply();
+        String pkg = (intent != null && ACTION_APP_SWITCH.equals(intent.getAction()))
+            ? intent.getStringExtra(EXTRA_PACKAGE)
+            : AppSwitchAccessibilityService.getLastRealPackage();
+        engine.apply(pkg);
         return START_STICKY;
     }
 

@@ -2,12 +2,16 @@ package com.thor.audiounlocker;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -18,6 +22,10 @@ import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 public final class MainActivity extends Activity {
 
     private Prefs prefs;
@@ -25,6 +33,8 @@ public final class MainActivity extends Activity {
     private TextView gainValueView;
     private TextView gainRangeHint;
     private SeekBar gainSlider;
+    private TextView accStatusView;
+    private LinearLayout perAppListContainer;
     private TextView widthValueView;
     private SeekBar widthSlider;
     private final SeekBar[] eqSliders = new SeekBar[Prefs.EQ_CUTOFFS_HZ.length];
@@ -53,6 +63,8 @@ public final class MainActivity extends Activity {
         if (statusView != null) {
             statusView.setText(AudioBoostService.getLastStatus());
         }
+        updateAccessibilityStatus();
+        rebuildPerAppList();
         AudioBoostService.setStatusCallback(text -> runOnUiThread(() -> {
             if (statusView != null) statusView.setText(text);
         }));
@@ -89,7 +101,7 @@ public final class MainActivity extends Activity {
         statusView.setPadding(0, dp(4), 0, dp(14));
         root.addView(statusView);
 
-        // 1. Gain Card (0-10 dB safe, optional 20 dB danger toggle)
+        // 1. Global Gain Card (0-10 dB safe, optional 20 dB danger toggle)
         LinearLayout gainCard = makeCard();
         root.addView(gainCard);
 
@@ -98,7 +110,7 @@ public final class MainActivity extends Activity {
         gainCard.addView(gainHeader);
 
         TextView gainLabel = new TextView(this);
-        gainLabel.setText("Speaker Boost Gain");
+        gainLabel.setText("Global Speaker Gain");
         gainLabel.setTextColor(Color.WHITE);
         gainLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         gainLabel.setTypeface(null, Typeface.BOLD);
@@ -134,7 +146,6 @@ public final class MainActivity extends Activity {
         updateGainRangeHint();
         gainCard.addView(gainRangeHint);
 
-        // Danger Extra dB Toggle
         addSwitchRow(
             gainCard,
             "Extra dB Mode (Up to +20 dB)",
@@ -149,11 +160,75 @@ public final class MainActivity extends Activity {
                 gainSlider.setProgress(clampedGain);
                 updateGainReadout(clampedGain);
                 updateGainRangeHint();
+                rebuildPerAppList();
                 pushServiceUpdate();
             }
         );
 
-        // 2. Stereo Stage Widener & 5-Band EQ Card
+        // 2. Per-App Gain Card
+        LinearLayout perAppCard = makeCard();
+        root.addView(perAppCard);
+
+        TextView perAppTitle = new TextView(this);
+        perAppTitle.setText("Per-App Gain (e.g. DroidDeck Only)");
+        perAppTitle.setTextColor(Color.WHITE);
+        perAppTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        perAppTitle.setTypeface(null, Typeface.BOLD);
+        perAppTitle.setPadding(0, 0, 0, dp(4));
+        perAppCard.addView(perAppTitle);
+
+        addSwitchRow(
+            perAppCard,
+            "Per-App Boost Only",
+            "ON = boosts ONLY apps listed below (0 dB standby for all other apps)",
+            Color.parseColor("#94A3B8"),
+            prefs.isPerAppMode(),
+            checked -> {
+                prefs.setPerAppMode(checked);
+                pushServiceUpdate();
+            }
+        );
+
+        accStatusView = new TextView(this);
+        accStatusView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        accStatusView.setPadding(0, dp(2), 0, dp(8));
+        perAppCard.addView(accStatusView);
+        updateAccessibilityStatus();
+
+        LinearLayout perAppBtnRow = new LinearLayout(this);
+        perAppBtnRow.setOrientation(LinearLayout.HORIZONTAL);
+        perAppCard.addView(perAppBtnRow);
+
+        Button addAppBtn = new Button(this);
+        addAppBtn.setText("+ Add App");
+        addAppBtn.setAllCaps(false);
+        addAppBtn.setTextColor(Color.parseColor("#0B1120"));
+        addAppBtn.setTypeface(null, Typeface.BOLD);
+        addAppBtn.setBackground(makeRoundedBg("#38BDF8", 10));
+        LinearLayout.LayoutParams lpAdd = new LinearLayout.LayoutParams(0, dp(40), 1f);
+        lpAdd.rightMargin = dp(6);
+        addAppBtn.setLayoutParams(lpAdd);
+        addAppBtn.setOnClickListener(v -> showAppPickerDialog());
+        perAppBtnRow.addView(addAppBtn);
+
+        Button accBtn = new Button(this);
+        accBtn.setText("Accessibility Settings");
+        accBtn.setAllCaps(false);
+        accBtn.setTextColor(Color.WHITE);
+        accBtn.setBackground(makeRoundedBg("#1E293B", 10));
+        LinearLayout.LayoutParams lpAcc = new LinearLayout.LayoutParams(0, dp(40), 1f);
+        lpAcc.leftMargin = dp(6);
+        accBtn.setLayoutParams(lpAcc);
+        accBtn.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+        perAppBtnRow.addView(accBtn);
+
+        perAppListContainer = new LinearLayout(this);
+        perAppListContainer.setOrientation(LinearLayout.VERTICAL);
+        perAppListContainer.setPadding(0, dp(10), 0, 0);
+        perAppCard.addView(perAppListContainer);
+        rebuildPerAppList();
+
+        // 3. Stereo Stage Widener & 5-Band EQ Card
         LinearLayout eqCard = makeCard();
         root.addView(eqCard);
 
@@ -225,7 +300,6 @@ public final class MainActivity extends Activity {
             }
         );
 
-        // EQ Preset Buttons
         LinearLayout eqPresets = new LinearLayout(this);
         eqPresets.setOrientation(LinearLayout.HORIZONTAL);
         eqPresets.setPadding(0, dp(6), 0, dp(10));
@@ -235,7 +309,6 @@ public final class MainActivity extends Activity {
         addPresetBtn(eqPresets, "Vocal Clear", new int[]{-3, 0, 4, 3, 1}, 50);
         addPresetBtn(eqPresets, "Flat", new int[]{0, 0, 0, 0, 0}, 0);
 
-        // 5 EQ Sliders
         for (int i = 0; i < Prefs.EQ_CUTOFFS_HZ.length; i++) {
             final int bandIndex = i;
             int currentDb = prefs.getEqBandDb(i);
@@ -260,7 +333,7 @@ public final class MainActivity extends Activity {
             eqValueViews[i] = bandVal;
 
             SeekBar sb = new SeekBar(this);
-            sb.setMax(Prefs.EQ_MAX_DB - Prefs.EQ_MIN_DB); // 0..24 maps to -12..+12
+            sb.setMax(Prefs.EQ_MAX_DB - Prefs.EQ_MIN_DB);
             sb.setProgress(currentDb - Prefs.EQ_MIN_DB);
             sb.setPadding(0, dp(4), 0, dp(8));
             sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -280,7 +353,7 @@ public final class MainActivity extends Activity {
             eqSliders[i] = sb;
         }
 
-        // 3. Service & Protection Card
+        // 4. Service & Protection Card
         LinearLayout settingsCard = makeCard();
         root.addView(settingsCard);
 
@@ -305,7 +378,6 @@ public final class MainActivity extends Activity {
         addSwitchRow(settingsCard, "Auto-Start on Boot", "Starts automatically when your AYN Thor boots",
             Color.parseColor("#94A3B8"), prefs.isStartOnBoot(), prefs::setStartOnBoot);
 
-        // Apply & Close UI
         Button closeBtn = new Button(this);
         closeBtn.setText("Apply & Close UI (Keep Service Running)");
         closeBtn.setAllCaps(false);
@@ -324,6 +396,139 @@ public final class MainActivity extends Activity {
         root.addView(closeBtn);
 
         return scroll;
+    }
+
+    private void updateAccessibilityStatus() {
+        if (accStatusView == null) return;
+        if (AppSwitchAccessibilityService.isConnected()) {
+            accStatusView.setText("Per-App Switcher: Connected (0% CPU during gameplay)");
+            accStatusView.setTextColor(Color.parseColor("#4ADE80"));
+        } else {
+            accStatusView.setText("Per-App Switcher: Not enabled — tap Accessibility Settings and turn on 'Thor Audio Per-App Switcher'");
+            accStatusView.setTextColor(Color.parseColor("#FBBF24"));
+        }
+    }
+
+    private void rebuildPerAppList() {
+        if (perAppListContainer == null) return;
+        perAppListContainer.removeAllViews();
+
+        List<String> pkgs = prefs.getPerAppPackages();
+        if (pkgs.isEmpty()) {
+            TextView empty = new TextView(this);
+            empty.setText("No apps added yet. Tap '+ Add App' to select DroidDeck or any game.");
+            empty.setTextColor(Color.parseColor("#64748B"));
+            empty.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            perAppListContainer.addView(empty);
+            return;
+        }
+
+        int maxDb = prefs.getCurrentMaxDb();
+        for (String pkg : pkgs) {
+            String label = prefs.getPerAppLabel(pkg);
+            int appDb = Math.max(0, prefs.getPerAppGainDb(pkg));
+
+            LinearLayout box = new LinearLayout(this);
+            box.setOrientation(LinearLayout.VERTICAL);
+            box.setBackground(makeRoundedBg("#1E293B", 12));
+            int p = dp(12);
+            box.setPadding(p, p, p, p);
+            LinearLayout.LayoutParams boxLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            );
+            boxLp.bottomMargin = dp(8);
+            box.setLayoutParams(boxLp);
+
+            LinearLayout topRow = new LinearLayout(this);
+            topRow.setOrientation(LinearLayout.HORIZONTAL);
+            topRow.setGravity(Gravity.CENTER_VERTICAL);
+            box.addView(topRow);
+
+            TextView nameView = new TextView(this);
+            nameView.setText(label);
+            nameView.setTextColor(Color.WHITE);
+            nameView.setTypeface(null, Typeface.BOLD);
+            nameView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+            nameView.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            topRow.addView(nameView);
+
+            TextView dbView = new TextView(this);
+            dbView.setText("+" + appDb + " dB");
+            dbView.setTextColor(appDb > Prefs.SAFE_MAX_DB ? Color.parseColor("#EF4444") : Color.parseColor("#38BDF8"));
+            dbView.setTypeface(null, Typeface.BOLD);
+            dbView.setPadding(0, 0, dp(10), 0);
+            topRow.addView(dbView);
+
+            Button removeBtn = new Button(this);
+            removeBtn.setText("Remove");
+            removeBtn.setAllCaps(false);
+            removeBtn.setTextColor(Color.parseColor("#F87171"));
+            removeBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+            removeBtn.setBackground(makeRoundedBg("#0F172A", 8));
+            removeBtn.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(32)));
+            removeBtn.setOnClickListener(v -> {
+                prefs.removePerApp(pkg);
+                rebuildPerAppList();
+                pushServiceUpdate();
+            });
+            topRow.addView(removeBtn);
+
+            SeekBar sb = new SeekBar(this);
+            sb.setMax(maxDb);
+            sb.setProgress(Math.min(maxDb, appDb));
+            sb.setPadding(0, dp(6), 0, 0);
+            sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override
+                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    dbView.setText("+" + progress + " dB");
+                    dbView.setTextColor(progress > Prefs.SAFE_MAX_DB ? Color.parseColor("#EF4444") : Color.parseColor("#38BDF8"));
+                    if (fromUser) {
+                        prefs.setPerAppGain(pkg, label, progress);
+                        pushServiceUpdate();
+                    }
+                }
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+                @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+            });
+            box.addView(sb);
+            perAppListContainer.addView(box);
+        }
+    }
+
+    private void showAppPickerDialog() {
+        PackageManager pm = getPackageManager();
+        Intent mainIntent = new Intent(Intent.ACTION_MAIN, null);
+        mainIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+        List<ResolveInfo> resolved = pm.queryIntentActivities(mainIntent, 0);
+
+        List<String[]> apps = new ArrayList<>();
+        String myPkg = getPackageName();
+        for (ResolveInfo ri : resolved) {
+            String pkg = ri.activityInfo.packageName;
+            if (pkg.equals(myPkg)) continue;
+            CharSequence labelSeq = ri.loadLabel(pm);
+            String label = (labelSeq != null && labelSeq.length() > 0) ? labelSeq.toString() : pkg;
+            apps.add(new String[]{label, pkg});
+        }
+        Collections.sort(apps, (a, b) -> a[0].compareToIgnoreCase(b[0]));
+
+        String[] items = new String[apps.size()];
+        for (int i = 0; i < apps.size(); i++) {
+            items[i] = apps.get(i)[0] + " (" + apps.get(i)[1] + ")";
+        }
+
+        new AlertDialog.Builder(this)
+            .setTitle("Select App to Boost")
+            .setItems(items, (dialog, which) -> {
+                String label = apps.get(which)[0];
+                String pkg = apps.get(which)[1];
+                prefs.setPerAppGain(pkg, label, Math.min(prefs.getCurrentMaxDb(), 8));
+                prefs.setPerAppMode(true);
+                rebuildPerAppList();
+                pushServiceUpdate();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
     }
 
     private void addPresetBtn(LinearLayout row, String label, int[] bands, int widthPct) {

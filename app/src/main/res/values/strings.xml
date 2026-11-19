@@ -3,4 +3,6 @@
     <string name="app_name">Thor Audio Unlocker</string>
     <string name="tile_label">Thor Boost</string>
     <string name="notification_channel_name">Thor Audio Boost</string>
+    <string name="accessibility_service_label">Thor Audio Per-App Switcher</string>
+    <string name="accessibility_service_desc">Detects foreground app switches (window state only, no input or screen reading) to apply per-app dB gain.</string>
 </resources>

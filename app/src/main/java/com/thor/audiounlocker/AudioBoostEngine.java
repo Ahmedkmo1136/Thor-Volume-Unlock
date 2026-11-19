@@ -24,16 +24,17 @@ public final class AudioBoostEngine {
     private Virtualizer virtualizer;
     private LoudnessEnhancer fallbackLe;
     private boolean callbackRegistered = false;
+    private String currentForegroundPkg = null;
 
     private final AudioDeviceCallback deviceCallback = new AudioDeviceCallback() {
         @Override
         public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {
-            apply();
+            apply(currentForegroundPkg);
         }
 
         @Override
         public void onAudioDevicesRemoved(AudioDeviceInfo[] removedDevices) {
-            apply();
+            apply(currentForegroundPkg);
         }
     };
 
@@ -48,7 +49,7 @@ public final class AudioBoostEngine {
             audioManager.registerAudioDeviceCallback(deviceCallback, new Handler(Looper.getMainLooper()));
             callbackRegistered = true;
         }
-        apply();
+        apply(AppSwitchAccessibilityService.getLastRealPackage());
     }
 
     public void stop() {
@@ -60,7 +61,11 @@ public final class AudioBoostEngine {
         notifyListener("Off", false, false);
     }
 
-    public void apply() {
+    public void apply(String foregroundPkg) {
+        if (foregroundPkg != null) {
+            this.currentForegroundPkg = foregroundPkg;
+        }
+
         String externalDevice = findExternalOutputName();
 
         if (!prefs.isEnabled()) {
@@ -75,7 +80,26 @@ public final class AudioBoostEngine {
             return;
         }
 
-        int gainDb = prefs.getGainDb();
+        int gainDb;
+        String scopeLabel;
+
+        if (prefs.isPerAppMode()) {
+            int appDb = prefs.getPerAppGainDb(this.currentForegroundPkg);
+            if (appDb < 0) {
+                releaseAll();
+                String waitingOn = (this.currentForegroundPkg == null)
+                    ? "Waiting for selected app"
+                    : ("Standby (" + shortPkgName(this.currentForegroundPkg) + ")");
+                notifyListener(waitingOn, false, true);
+                return;
+            }
+            gainDb = appDb;
+            scopeLabel = "[" + prefs.getPerAppLabel(this.currentForegroundPkg) + "] ";
+        } else {
+            gainDb = prefs.getGainDb();
+            scopeLabel = "";
+        }
+
         boolean limiterOn = prefs.isLimiterEnabled();
         boolean eqOn = prefs.isEqEnabled();
         boolean wideOn = prefs.isStereoWideEnabled();
@@ -90,15 +114,20 @@ public final class AudioBoostEngine {
         if (dpOk) {
             releaseLoudnessEnhancer();
             String stageNote = wideOn ? (" • Stage " + widthPct + "%" + (virtOk ? " (Virt+EQ)" : " (Stereo EQ)")) : "";
-            notifyListener("Active: +" + gainDb + " dB" + stageNote, true, false);
+            notifyListener("Active " + scopeLabel + "+" + gainDb + " dB" + stageNote, true, false);
         } else {
             boolean leOk = applyLoudnessEnhancer(gainDb * 100);
             if (leOk) {
-                notifyListener("Active: +" + gainDb + " dB (Fallback)", true, false);
+                notifyListener("Active " + scopeLabel + "+" + gainDb + " dB (Fallback)", true, false);
             } else {
                 notifyListener("Error: Android rejected global audio effect", false, false);
             }
         }
+    }
+
+    private String shortPkgName(String pkg) {
+        int idx = pkg.lastIndexOf('.');
+        return (idx >= 0 && idx + 1 < pkg.length()) ? pkg.substring(idx + 1) : pkg;
     }
 
     private boolean applyDynamicsProcessing(
@@ -126,7 +155,6 @@ public final class AudioBoostEngine {
             b.setInputGainAllChannelsTo((float) gainDb);
 
             if (usePostEq) {
-                // Complementary L/R mid-high tilt widens narrow handheld speakers even if Virtualizer is ignored
                 float tilt = (wideOn && widthPct > 0) ? (widthPct / 100.0f) * 2.0f : 0.0f;
 
                 DynamicsProcessing.Eq eqLeft = new DynamicsProcessing.Eq(true, true, bandCount);
@@ -135,9 +163,9 @@ public final class AudioBoostEngine {
                 for (int i = 0; i < bandCount; i++) {
                     float base = eqOn ? (float) prefs.getEqBandDb(i) : 0.0f;
                     float leftOffset = 0.0f;
-                    if (i == 2) leftOffset = +tilt;       // 910 Hz
-                    else if (i == 3) leftOffset = -tilt;  // 3.6 kHz
-                    else if (i == 4) leftOffset = +tilt;  // 12 kHz
+                    if (i == 2) leftOffset = +tilt;
+                    else if (i == 3) leftOffset = -tilt;
+                    else if (i == 4) leftOffset = +tilt;
 
                     float leftGain = clamp(base + leftOffset, -15f, 15f);
                     float rightGain = clamp(base - leftOffset, -15f, 15f);

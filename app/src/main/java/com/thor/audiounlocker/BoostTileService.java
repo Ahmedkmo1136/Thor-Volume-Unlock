@@ -31,7 +31,7 @@ public final class BoostTileService extends TileService {
         Prefs prefs = new Prefs(this);
         boolean on = prefs.isEnabled();
         tile.setState(on ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
-        tile.setSubtitle(on ? ("+" + prefs.getGainDb() + " dB") : "Off");
+        tile.setSubtitle(on ? (prefs.isPerAppMode() ? "Per-App" : ("+" + prefs.getGainDb() + " dB")) : "Off");
         tile.updateTile();
     }
 }
