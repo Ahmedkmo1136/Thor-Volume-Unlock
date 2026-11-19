@@ -6,6 +6,7 @@ import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.media.audiofx.DynamicsProcessing;
 import android.media.audiofx.LoudnessEnhancer;
+import android.media.audiofx.Virtualizer;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -20,7 +21,8 @@ public final class AudioBoostEngine {
     private final Listener listener;
 
     private DynamicsProcessing dp;
-    private LoudnessEnhancer le;
+    private Virtualizer virtualizer;
+    private LoudnessEnhancer fallbackLe;
     private boolean callbackRegistered = false;
 
     private final AudioDeviceCallback deviceCallback = new AudioDeviceCallback() {
@@ -75,46 +77,78 @@ public final class AudioBoostEngine {
 
         int gainDb = prefs.getGainDb();
         boolean limiterOn = prefs.isLimiterEnabled();
-        boolean overdrive = prefs.isOverdriveStack();
+        boolean eqOn = prefs.isEqEnabled();
+        boolean wideOn = prefs.isStereoWideEnabled();
+        int widthPct = prefs.getStageWidthPercent();
 
-        boolean dpOk = applyDynamicsProcessing(gainDb, limiterOn);
-        boolean leOk = false;
-
-        if (!dpOk) {
-            // Fallback: LoudnessEnhancer handles the full boost
-            leOk = applyLoudnessEnhancer(Math.min(3500, gainDb * 100));
-        } else if (overdrive && gainDb > 0) {
-            // Stack LoudnessEnhancer on top of DynamicsProcessing to punch past OEM HAL caps
-            int extraMb = Math.min(2500, (gainDb * 100) / 2);
-            leOk = applyLoudnessEnhancer(extraMb);
-        } else {
-            releaseLoudnessEnhancer();
+        boolean dpOk = applyDynamicsProcessing(gainDb, limiterOn, eqOn, wideOn, widthPct);
+        boolean virtOk = wideOn && widthPct > 0 && applyVirtualizer(widthPct);
+        if (!wideOn || widthPct == 0) {
+            releaseVirtualizer();
         }
 
-        if (dpOk && leOk) {
-            notifyListener("Active: +" + gainDb + " dB (DP + Overdrive)", true, false);
-        } else if (dpOk) {
-            notifyListener("Active: +" + gainDb + " dB (DynamicsProcessing)", true, false);
-        } else if (leOk) {
-            notifyListener("Active: +" + gainDb + " dB (LoudnessEnhancer)", true, false);
+        if (dpOk) {
+            releaseLoudnessEnhancer();
+            String stageNote = wideOn ? (" • Stage " + widthPct + "%" + (virtOk ? " (Virt+EQ)" : " (Stereo EQ)")) : "";
+            notifyListener("Active: +" + gainDb + " dB" + stageNote, true, false);
         } else {
-            notifyListener("Error: Android rejected global audio effect", false, false);
+            boolean leOk = applyLoudnessEnhancer(gainDb * 100);
+            if (leOk) {
+                notifyListener("Active: +" + gainDb + " dB (Fallback)", true, false);
+            } else {
+                notifyListener("Error: Android rejected global audio effect", false, false);
+            }
         }
     }
 
-    private boolean applyDynamicsProcessing(int gainDb, boolean limiterOn) {
+    private boolean applyDynamicsProcessing(
+        int gainDb,
+        boolean limiterOn,
+        boolean eqOn,
+        boolean wideOn,
+        int widthPct
+    ) {
         try {
             releaseDynamicsProcessing();
+
+            boolean usePostEq = eqOn || (wideOn && widthPct > 0);
+            int bandCount = Prefs.EQ_CUTOFFS_HZ.length;
+
             DynamicsProcessing.Config.Builder b = new DynamicsProcessing.Config.Builder(
                 DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION,
                 2,
                 false, 0,
                 false, 0,
-                false, 0,
+                usePostEq, usePostEq ? bandCount : 0,
                 limiterOn
             );
             b.setPreferredFrameDuration(10.0f);
             b.setInputGainAllChannelsTo((float) gainDb);
+
+            if (usePostEq) {
+                // Complementary L/R mid-high tilt widens narrow handheld speakers even if Virtualizer is ignored
+                float tilt = (wideOn && widthPct > 0) ? (widthPct / 100.0f) * 2.0f : 0.0f;
+
+                DynamicsProcessing.Eq eqLeft = new DynamicsProcessing.Eq(true, true, bandCount);
+                DynamicsProcessing.Eq eqRight = new DynamicsProcessing.Eq(true, true, bandCount);
+
+                for (int i = 0; i < bandCount; i++) {
+                    float base = eqOn ? (float) prefs.getEqBandDb(i) : 0.0f;
+                    float leftOffset = 0.0f;
+                    if (i == 2) leftOffset = +tilt;       // 910 Hz
+                    else if (i == 3) leftOffset = -tilt;  // 3.6 kHz
+                    else if (i == 4) leftOffset = +tilt;  // 12 kHz
+
+                    float leftGain = clamp(base + leftOffset, -15f, 15f);
+                    float rightGain = clamp(base - leftOffset, -15f, 15f);
+
+                    eqLeft.setBand(i, new DynamicsProcessing.EqBand(true, Prefs.EQ_CUTOFFS_HZ[i], leftGain));
+                    eqRight.setBand(i, new DynamicsProcessing.EqBand(true, Prefs.EQ_CUTOFFS_HZ[i], rightGain));
+                }
+
+                b.setPostEqByChannelIndex(0, eqLeft);
+                b.setPostEqByChannelIndex(1, eqRight);
+            }
 
             if (limiterOn) {
                 DynamicsProcessing.Limiter lim = new DynamicsProcessing.Limiter(
@@ -132,13 +166,30 @@ public final class AudioBoostEngine {
         }
     }
 
+    private boolean applyVirtualizer(int widthPct) {
+        try {
+            if (virtualizer == null) {
+                virtualizer = new Virtualizer(Integer.MAX_VALUE, 0);
+            }
+            if (virtualizer.getStrengthSupported()) {
+                short strength = (short) Math.max(0, Math.min(1000, widthPct * 10));
+                virtualizer.setStrength(strength);
+            }
+            virtualizer.setEnabled(true);
+            return true;
+        } catch (Throwable ignored) {
+            releaseVirtualizer();
+            return false;
+        }
+    }
+
     private boolean applyLoudnessEnhancer(int targetMb) {
         try {
-            if (le == null) {
-                le = new LoudnessEnhancer(0);
+            if (fallbackLe == null) {
+                fallbackLe = new LoudnessEnhancer(0);
             }
-            le.setTargetGain(Math.max(0, targetMb));
-            le.setEnabled(true);
+            fallbackLe.setTargetGain(Math.max(0, Math.min(2000, targetMb)));
+            fallbackLe.setEnabled(true);
             return true;
         } catch (Throwable ignored) {
             releaseLoudnessEnhancer();
@@ -174,8 +225,13 @@ public final class AudioBoostEngine {
         return null;
     }
 
+    private float clamp(float val, float min, float max) {
+        return Math.max(min, Math.min(max, val));
+    }
+
     private void releaseAll() {
         releaseDynamicsProcessing();
+        releaseVirtualizer();
         releaseLoudnessEnhancer();
     }
 
@@ -190,14 +246,25 @@ public final class AudioBoostEngine {
         }
     }
 
-    private void releaseLoudnessEnhancer() {
-        if (le != null) {
+    private void releaseVirtualizer() {
+        if (virtualizer != null) {
             try {
-                le.setEnabled(false);
-                le.release();
+                virtualizer.setEnabled(false);
+                virtualizer.release();
             } catch (Throwable ignored) {
             }
-            le = null;
+            virtualizer = null;
+        }
+    }
+
+    private void releaseLoudnessEnhancer() {
+        if (fallbackLe != null) {
+            try {
+                fallbackLe.setEnabled(false);
+                fallbackLe.release();
+            } catch (Throwable ignored) {
+            }
+            fallbackLe = null;
         }
     }
 
