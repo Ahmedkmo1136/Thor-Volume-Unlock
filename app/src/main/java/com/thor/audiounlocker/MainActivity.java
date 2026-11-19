@@ -482,7 +482,7 @@ public final class MainActivity extends Activity {
         joeyLp.bottomMargin = dp(8);
         joeyBtn.setLayoutParams(joeyLp);
         joeyBtn.setOnClickListener(v -> loadPresetAndRefresh(
-            Prefs.PRESET_JOEY_EQ, 11, true, 40, true, -0.1f, 500
+            Prefs.PRESET_JOEY_EQ, 16, true, 40, true, -0.1f, 500
         ));
         presetCard.addView(joeyBtn);
 
@@ -621,7 +621,7 @@ public final class MainActivity extends Activity {
         );
 
         makeupValueView = addSliderHeader(eqCard, "EQ Makeup Gain (Compensates Deep Cuts)", "+" + prefs.getEqMakeupDb() + " dB");
-        makeupSlider = createStyledSeekBar(15, prefs.getEqMakeupDb());
+        makeupSlider = createStyledSeekBar(20, prefs.getEqMakeupDb());
         makeupSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {

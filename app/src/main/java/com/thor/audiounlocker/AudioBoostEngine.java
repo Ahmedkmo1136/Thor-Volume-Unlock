@@ -163,26 +163,29 @@ public final class AudioBoostEngine {
         int limiterReleaseMs
     ) {
         try {
-            boolean usePostEq = eqOn || (wideOn && widthPct > 0);
+            boolean useEq = eqOn || (wideOn && widthPct > 0);
             int bandCount = Prefs.EQ_FREQS_HZ.length;
-            float totalGain = (float) (gainDb + makeupDb);
 
-            // Only recreate DynamicsProcessing if it doesn't exist or structural stages changed
-            if (dp == null || dpHasPostEq != usePostEq || dpHasLimiter != limiterOn) {
+            // Keep user gain cleanly in InputGain, and apply EQ makeup directly to the EQ curve
+            // so deep midrange cuts (like Joey's -20 dB EQ) never drop overall loudness or hit HAL input-gain clamps.
+            float inputGain = (float) gainDb;
+            float eqShift = eqOn ? (float) makeupDb : 0.0f;
+
+            if (dp == null || dpHasPostEq != useEq || dpHasLimiter != limiterOn) {
                 releaseDynamicsProcessing();
                 DynamicsProcessing.Config.Builder b = new DynamicsProcessing.Config.Builder(
                     DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION,
                     2,
+                    useEq, useEq ? bandCount : 0,
                     false, 0,
                     false, 0,
-                    usePostEq, usePostEq ? bandCount : 0,
                     limiterOn
                 );
                 b.setPreferredFrameDuration(10.0f);
-                b.setInputGainAllChannelsTo(totalGain);
+                b.setInputGainAllChannelsTo(inputGain);
 
-                if (usePostEq) {
-                    applyPostEqToBuilder(b, eqOn, wideOn, widthPct, bandCount);
+                if (useEq) {
+                    applyPreEqToBuilder(b, eqOn, eqShift, wideOn, widthPct, bandCount);
                 }
                 if (limiterOn) {
                     b.setLimiterAllChannelsTo(new DynamicsProcessing.Limiter(
@@ -191,21 +194,21 @@ public final class AudioBoostEngine {
                 }
 
                 dp = new DynamicsProcessing(Integer.MAX_VALUE, 0, b.build());
-                dpHasPostEq = usePostEq;
+                dpHasPostEq = useEq;
                 dpHasLimiter = limiterOn;
                 dp.setEnabled(true);
                 return true;
             }
 
             // Fast in-place parameter update (zero audio pop, zero native reallocation)
-            dp.setInputGainAllChannelsTo(totalGain);
-            if (usePostEq) {
+            dp.setInputGainAllChannelsTo(inputGain);
+            if (useEq) {
                 float tilt = (wideOn && widthPct > 0) ? (widthPct / 100.0f) * 2.0f : 0.0f;
                 DynamicsProcessing.Eq eqLeft = new DynamicsProcessing.Eq(true, true, bandCount);
                 DynamicsProcessing.Eq eqRight = new DynamicsProcessing.Eq(true, true, bandCount);
-                populateStereoEq(eqLeft, eqRight, eqOn, tilt, bandCount);
-                dp.setPostEqByChannelIndex(0, eqLeft);
-                dp.setPostEqByChannelIndex(1, eqRight);
+                populateStereoEq(eqLeft, eqRight, eqOn, eqShift, tilt, bandCount);
+                dp.setPreEqByChannelIndex(0, eqLeft);
+                dp.setPreEqByChannelIndex(1, eqRight);
             }
             if (limiterOn) {
                 dp.setLimiterAllChannelsTo(new DynamicsProcessing.Limiter(
@@ -222,9 +225,10 @@ public final class AudioBoostEngine {
         }
     }
 
-    private void applyPostEqToBuilder(
+    private void applyPreEqToBuilder(
         DynamicsProcessing.Config.Builder b,
         boolean eqOn,
+        float eqShift,
         boolean wideOn,
         int widthPct,
         int bandCount
@@ -232,28 +236,29 @@ public final class AudioBoostEngine {
         float tilt = (wideOn && widthPct > 0) ? (widthPct / 100.0f) * 2.0f : 0.0f;
         DynamicsProcessing.Eq eqLeft = new DynamicsProcessing.Eq(true, true, bandCount);
         DynamicsProcessing.Eq eqRight = new DynamicsProcessing.Eq(true, true, bandCount);
-        populateStereoEq(eqLeft, eqRight, eqOn, tilt, bandCount);
-        b.setPostEqByChannelIndex(0, eqLeft);
-        b.setPostEqByChannelIndex(1, eqRight);
+        populateStereoEq(eqLeft, eqRight, eqOn, eqShift, tilt, bandCount);
+        b.setPreEqByChannelIndex(0, eqLeft);
+        b.setPreEqByChannelIndex(1, eqRight);
     }
 
     private void populateStereoEq(
         DynamicsProcessing.Eq eqLeft,
         DynamicsProcessing.Eq eqRight,
         boolean eqOn,
+        float eqShift,
         float tilt,
         int bandCount
     ) {
         for (int i = 0; i < bandCount; i++) {
             float freq = Prefs.EQ_FREQS_HZ[i];
-            float base = eqOn ? prefs.getEqBandDb(i) : 0.0f;
+            float base = eqOn ? (prefs.getEqBandDb(i) + eqShift) : 0.0f;
             float leftOffset = 0.0f;
             if (freq >= 850f && freq <= 1860f) leftOffset = +tilt * 0.75f;
             else if (freq >= 2800f && freq <= 5000f) leftOffset = -tilt * 0.75f;
             else if (freq >= 9050f) leftOffset = +tilt * 0.75f;
 
-            eqLeft.setBand(i, new DynamicsProcessing.EqBand(true, freq, clamp(base + leftOffset, -36f, 15f)));
-            eqRight.setBand(i, new DynamicsProcessing.EqBand(true, freq, clamp(base - leftOffset, -36f, 15f)));
+            eqLeft.setBand(i, new DynamicsProcessing.EqBand(true, freq, clamp(base + leftOffset, -32f, 15f)));
+            eqRight.setBand(i, new DynamicsProcessing.EqBand(true, freq, clamp(base - leftOffset, -32f, 15f)));
         }
     }
 

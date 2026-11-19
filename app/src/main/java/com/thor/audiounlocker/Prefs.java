@@ -45,7 +45,7 @@ public final class Prefs {
         0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f
     };
 
-    private static final String NAME = "thor_boost_prefs_v6";
+    private static final String NAME = "thor_boost_prefs_v71";
     private static final String KEY_PER_APP_PKGS = "per_app_packages";
     private final SharedPreferences sp;
 
@@ -86,7 +86,7 @@ public final class Prefs {
     }
 
     public int getGainDb() {
-        int val = sp.getInt("gain_db", 4);
+        int val = sp.getInt("gain_db", 8);
         return Math.max(0, Math.min(getCurrentMaxDb(), val));
     }
 
@@ -158,12 +158,12 @@ public final class Prefs {
     }
 
     public int getEqMakeupDb() {
-        int val = sp.getInt("eq_makeup_db", 11);
-        return Math.max(0, Math.min(15, val));
+        int val = sp.getInt("eq_makeup_db", 16);
+        return Math.max(0, Math.min(20, val));
     }
 
     public void setEqMakeupDb(int db) {
-        int clamped = Math.max(0, Math.min(15, db));
+        int clamped = Math.max(0, Math.min(20, db));
         sp.edit().putInt("eq_makeup_db", clamped).apply();
     }
 
@@ -239,7 +239,7 @@ public final class Prefs {
     ) {
         SharedPreferences.Editor ed = sp.edit();
         ed.putBoolean("eq_enabled", true);
-        ed.putInt("eq_makeup_db", Math.max(0, Math.min(15, makeupDb)));
+        ed.putInt("eq_makeup_db", Math.max(0, Math.min(20, makeupDb)));
         for (int i = 0; i < EQ_FREQS_HZ.length && i < eqBands.length; i++) {
             ed.putFloat("eq19_band_" + i, Math.max(EQ_MIN_DB, Math.min(EQ_MAX_DB, eqBands[i])));
         }
