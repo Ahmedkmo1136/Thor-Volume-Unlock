@@ -231,9 +231,7 @@ public final class MainActivity extends Activity {
             if (!AppSwitchAccessibilityService.isConnected()) {
                 new AlertDialog.Builder(this)
                     .setTitle("Enable Accessibility First")
-                    .setMessage("To use per-app dB overrides, turn on 'Thor Audio Per-App Switcher' in Android Accessibility Settings first.
-
-It only listens for app switches (0% CPU during gameplay).")
+                    .setMessage("To use per-app dB overrides, turn on 'Thor Audio Per-App Switcher' in Android Accessibility Settings first.\n\nIt only listens for app switches (0% CPU during gameplay).")
                     .setPositiveButton("Open Accessibility Settings", (d, w) ->
                         startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)))
                     .setNegativeButton("Cancel", null)
