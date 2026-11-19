@@ -10,6 +10,14 @@ import java.util.List;
 import java.util.Set;
 
 public final class Prefs {
+    public static final String PROF_NORMAL = "normal";
+    public static final String PROF_LITER_JOEY = "liter_joey";
+    public static final String PROF_JOEY = "joey";
+    public static final String PROF_BASS = "bass";
+    public static final String PROF_VOCAL = "vocal";
+    public static final String PROF_CRISP = "crisp";
+    public static final String PROF_CUSTOM = "custom";
+
     public static final int SAFE_MAX_DB = 10;
     public static final int EXTRA_MAX_DB = 20;
 
@@ -245,7 +253,53 @@ public final class Prefs {
         sp.edit().putInt("limiter_release_ms", clamped).apply();
     }
 
+    public String getActiveProfile() {
+        return sp.getString("active_profile", PROF_NORMAL);
+    }
+
+    public void setActiveProfile(String profileId) {
+        sp.edit().putString("active_profile", profileId).apply();
+    }
+
+    public void saveCurrentAsCustom() {
+        SharedPreferences.Editor ed = sp.edit();
+        ed.putString("active_profile", PROF_CUSTOM);
+        ed.putBoolean("custom_saved", true);
+        ed.putBoolean("custom_eq_enabled", isEqEnabled());
+        ed.putInt("custom_eq_makeup_db", getEqMakeupDb());
+        for (int i = 0; i < EQ_FREQS_HZ.length; i++) {
+            ed.putFloat("custom_eq19_" + i, getEqBandDb(i));
+        }
+        ed.putBoolean("custom_stereo_on", isStereoWideEnabled());
+        ed.putInt("custom_stage_width", getStageWidthPercent());
+        ed.putBoolean("custom_limiter_on", isLimiterEnabled());
+        ed.putFloat("custom_limiter_thresh", getLimiterThresholdDb());
+        ed.putInt("custom_limiter_rel", getLimiterReleaseMs());
+        ed.apply();
+    }
+
+    public void restoreCustomIfSaved() {
+        if (!sp.getBoolean("custom_saved", false)) {
+            setActiveProfile(PROF_CUSTOM);
+            return;
+        }
+        SharedPreferences.Editor ed = sp.edit();
+        ed.putString("active_profile", PROF_CUSTOM);
+        ed.putBoolean("eq_enabled", sp.getBoolean("custom_eq_enabled", isEqEnabled()));
+        ed.putInt("eq_makeup_db", sp.getInt("custom_eq_makeup_db", getEqMakeupDb()));
+        for (int i = 0; i < EQ_FREQS_HZ.length; i++) {
+            ed.putFloat("eq19_band_" + i, sp.getFloat("custom_eq19_" + i, getEqBandDb(i)));
+        }
+        ed.putBoolean("stereo_wide_enabled", sp.getBoolean("custom_stereo_on", isStereoWideEnabled()));
+        ed.putInt("stage_width_pct", sp.getInt("custom_stage_width", getStageWidthPercent()));
+        ed.putBoolean("limiter_enabled", sp.getBoolean("custom_limiter_on", isLimiterEnabled()));
+        ed.putFloat("limiter_threshold_db", sp.getFloat("custom_limiter_thresh", getLimiterThresholdDb()));
+        ed.putInt("limiter_release_ms", sp.getInt("custom_limiter_rel", getLimiterReleaseMs()));
+        ed.apply();
+    }
+
     public void applyPresetTemplate(
+        String profileId,
         float[] eqBands,
         int makeupDb,
         boolean stereoOn,
@@ -255,6 +309,7 @@ public final class Prefs {
         int limiterReleaseMs
     ) {
         SharedPreferences.Editor ed = sp.edit();
+        ed.putString("active_profile", profileId);
         ed.putBoolean("eq_enabled", true);
         ed.putInt("eq_makeup_db", Math.max(0, Math.min(12, makeupDb)));
         for (int i = 0; i < EQ_FREQS_HZ.length && i < eqBands.length; i++) {
