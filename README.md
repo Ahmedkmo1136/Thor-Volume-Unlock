@@ -1,17 +1,17 @@
-# Thor Audio Unlocker
+# Thor Audio Unlocker (v6)
 
-Ultra-lightweight Android speaker boost, per-app gain override, and stereo stage equalizer for the **AYN Thor** (zero third-party libraries, ~100 KB APK, minimal RAM).
+Ultra-lightweight Android speaker boost, per-app gain override, 19-band equalizer, stereo stage widener, and output limiter for the **AYN Thor** (zero third-party libraries, ~100 KB APK, minimal RAM).
 
 ## Disclaimer
 
 > **This app is 100% vibecoded.** As the author, I have no coding experience and **no plans to maintain, fix, or update this project**. It is shared as-is in case other AYN Thor owners find it useful. Use at your own risk—especially when unlocking Extra dB Mode (+11 dB to +20 dB), which can distort audio or damage your speakers.
 
 ## Features
-- **Global dB + Non-Conflicting Per-App Overrides**: Set a default Global dB (e.g. `+2 dB`) for all apps, and add custom per-app overrides (e.g. `+10 dB` for a specific app). Listed apps automatically replace Global dB while in the foreground and revert cleanly when you switch back.
-- **Guided Accessibility Setup**: Prompts you to enable **Thor Audio Per-App Switcher** in Android Accessibility Settings (`TYPE_WINDOW_STATE_CHANGED` only, 0% CPU during gameplay) before adding per-app overrides.
-- **Joey's Retro Handhelds Thor Profile**: Built-in 19-band EQ curve (`70 Hz` – `16 kHz`) + `500 ms` limiter release + wide stereo stage based on Joey's Retro Handhelds AYN Thor audio guide, plus customizable **5-Band EQ** (`Wide Stage`, `Vocal Clear`, `Flat`, and `Custom`).
-- **Safe 0 to +10 dB Slider** + **Extra dB Mode (Up to +20 dB)** with a distortion/speaker danger warning.
-- **Auto-Start on Boot**, **Auto-Bypass on Headphones/Bluetooth**, and **Quick Settings Tile**.
+- **Global dB + Non-Conflicting Per-App Overrides**: Set a default Global dB (0–10 dB safe, optional up to +20 dB danger mode) for all apps, and add custom per-app overrides that replace Global dB automatically when you switch apps.
+- **Guided Accessibility Setup**: Clearly prompts you to enable **Thor Audio Per-App Switcher** (`TYPE_WINDOW_STATE_CHANGED` only, 0% CPU during gameplay) before adding per-app overrides.
+- **Full 19-Band Equalizer (`70 Hz` – `16 kHz`)**: Every band (`-32.0 dB` to `+12.0 dB` in `0.5 dB` steps) plus **EQ Makeup Gain** (`0` to `+15 dB`) is independently customizable.
+- **Independent Stereo Stage & Output Limiter Controls**: Customize Stereo Stage Width (`0–100%`), Limiter Threshold (`-6.0` to `0.0 dB`), and Limiter Release (`10–500 ms`) freely without being locked to a profile.
+- **Quick Profile Templates**: Load **Joey's Retro Handhelds Profile** (19-band curve, `40%` stereo width, `500 ms` limiter release, `+11 dB` makeup gain), **Wide Stage**, **Vocal Clear**, or **Flat** as starting points, then tweak any slider individually.
 
 ## Licenses & Credits
 

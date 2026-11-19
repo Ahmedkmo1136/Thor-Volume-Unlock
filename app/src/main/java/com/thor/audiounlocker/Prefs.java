@@ -12,38 +12,40 @@ import java.util.Set;
 public final class Prefs {
     public static final int SAFE_MAX_DB = 10;
     public static final int EXTRA_MAX_DB = 20;
-    public static final int EQ_MIN_DB = -12;
-    public static final int EQ_MAX_DB = 12;
 
-    public static final String PROFILE_JOEY = "joey";
-    public static final String PROFILE_WIDE = "wide";
-    public static final String PROFILE_VOCAL = "vocal";
-    public static final String PROFILE_FLAT = "flat";
-    public static final String PROFILE_CUSTOM = "custom";
+    public static final float EQ_MIN_DB = -32.0f;
+    public static final float EQ_MAX_DB = 12.0f;
+    public static final int EQ_SLIDER_STEPS = 88; // 0.5 dB steps from -32.0 to +12.0
 
-    // Exact 19-band curve from Joey's Retro Handhelds AYN Thor audio guide (Amphi EQ)
-    public static final float[] JOEY_FREQS_HZ = {
+    public static final float[] EQ_FREQS_HZ = {
         70f, 110f, 120f, 200f, 300f, 444f, 600f, 700f, 850f,
         1200f, 1860f, 2800f, 3800f, 5000f, 7000f, 9050f, 11000f, 12000f, 16000f
     };
-    public static final float[] JOEY_GAINS_DB = {
+
+    public static final String[] EQ_LABELS = {
+        "70 Hz", "110 Hz", "120 Hz", "200 Hz", "300 Hz", "444 Hz", "600 Hz", "700 Hz", "850 Hz",
+        "1.2 kHz", "1.86 kHz", "2.8 kHz", "3.8 kHz", "5 kHz", "7 kHz", "9.05 kHz", "11 kHz", "12 kHz", "16 kHz"
+    };
+
+    // Preset templates (selecting a preset copies its values into the independent settings below)
+    public static final float[] PRESET_JOEY_EQ = {
         -32.0f, -4.5f, -4.0f, -4.0f, -5.0f, -9.0f, -13.5f, -17.0f, -17.0f,
         -18.5f, -20.0f, -19.5f, -21.5f, -13.0f, -6.0f, -0.5f, 0.5f, -0.5f, -3.0f
     };
-    // Makeup gain so Joey's deeply carved mid-range curve stays full volume at normal slider levels
-    public static final float JOEY_MAKEUP_DB = 11.0f;
-
-    public static final float[] EQ_CUTOFFS_HZ = { 90f, 300f, 1000f, 3800f, 14000f };
-    public static final String[] EQ_LABELS = {
-        "60 Hz (Sub-Bass)",
-        "230 Hz (Warmth)",
-        "910 Hz (Vocals)",
-        "3.6 kHz (Presence)",
-        "12 kHz (Air / Stage)"
+    public static final float[] PRESET_WIDE_EQ = {
+        -6.0f, -2.0f, -1.0f, 0.5f, 1.0f, 1.0f, 1.5f, 2.0f, 2.0f,
+        2.5f, 2.5f, 3.0f, 3.0f, 2.5f, 2.5f, 2.5f, 3.0f, 2.5f, 1.5f
     };
-    private static final int[] DEFAULT_EQ_DB = { -2, 1, 2, 3, 2 };
+    public static final float[] PRESET_VOCAL_EQ = {
+        -8.0f, -3.0f, -2.0f, 0.0f, 0.5f, 1.5f, 2.5f, 3.5f, 4.0f,
+        4.0f, 3.5f, 3.0f, 2.5f, 1.5f, 1.0f, 0.5f, 0.5f, 0.0f, -1.0f
+    };
+    public static final float[] PRESET_FLAT_EQ = {
+        0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f,
+        0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f
+    };
 
-    private static final String NAME = "thor_boost_prefs_v5";
+    private static final String NAME = "thor_boost_prefs_v6";
     private static final String KEY_PER_APP_PKGS = "per_app_packages";
     private final SharedPreferences sp;
 
@@ -83,7 +85,6 @@ public final class Prefs {
         return isExtraGainUnlocked() ? EXTRA_MAX_DB : SAFE_MAX_DB;
     }
 
-    // Global baseline gain applied to all apps that do not have a per-app override
     public int getGainDb() {
         int val = sp.getInt("gain_db", 4);
         return Math.max(0, Math.min(getCurrentMaxDb(), val));
@@ -94,7 +95,7 @@ public final class Prefs {
         sp.edit().putInt("gain_db", clamped).apply();
     }
 
-    // --- Per-App Overrides (replaces Global dB for listed apps without conflict) ---
+    // --- Per-App Overrides ---
     public boolean isPerAppOverridesEnabled() {
         return sp.getBoolean("per_app_overrides_enabled", true);
     }
@@ -147,15 +148,38 @@ public final class Prefs {
         return sp.getString("per_app_label_" + pkg, pkg);
     }
 
-    // --- EQ Profile & Stereo Stage ---
-    public String getEqProfile() {
-        return sp.getString("eq_profile", PROFILE_JOEY);
+    // --- Independent 19-Band Equalizer Settings ---
+    public boolean isEqEnabled() {
+        return sp.getBoolean("eq_enabled", true);
     }
 
-    public void setEqProfile(String profile) {
-        sp.edit().putString("eq_profile", profile).apply();
+    public void setEqEnabled(boolean v) {
+        sp.edit().putBoolean("eq_enabled", v).apply();
     }
 
+    public int getEqMakeupDb() {
+        int val = sp.getInt("eq_makeup_db", 11);
+        return Math.max(0, Math.min(15, val));
+    }
+
+    public void setEqMakeupDb(int db) {
+        int clamped = Math.max(0, Math.min(15, db));
+        sp.edit().putInt("eq_makeup_db", clamped).apply();
+    }
+
+    public float getEqBandDb(int index) {
+        if (index < 0 || index >= EQ_FREQS_HZ.length) return 0f;
+        float val = sp.getFloat("eq19_band_" + index, PRESET_JOEY_EQ[index]);
+        return Math.max(EQ_MIN_DB, Math.min(EQ_MAX_DB, val));
+    }
+
+    public void setEqBandDb(int index, float db) {
+        if (index < 0 || index >= EQ_FREQS_HZ.length) return;
+        float clamped = Math.max(EQ_MIN_DB, Math.min(EQ_MAX_DB, db));
+        sp.edit().putFloat("eq19_band_" + index, clamped).apply();
+    }
+
+    // --- Independent Stereo Widener Settings ---
     public boolean isStereoWideEnabled() {
         return sp.getBoolean("stereo_wide_enabled", true);
     }
@@ -165,7 +189,7 @@ public final class Prefs {
     }
 
     public int getStageWidthPercent() {
-        int v = sp.getInt("stage_width_pct", 80);
+        int v = sp.getInt("stage_width_pct", 40);
         return Math.max(0, Math.min(100, v));
     }
 
@@ -174,26 +198,7 @@ public final class Prefs {
         sp.edit().putInt("stage_width_pct", clamped).apply();
     }
 
-    public boolean isEqEnabled() {
-        return sp.getBoolean("eq_enabled", true);
-    }
-
-    public void setEqEnabled(boolean v) {
-        sp.edit().putBoolean("eq_enabled", v).apply();
-    }
-
-    public int getEqBandDb(int index) {
-        if (index < 0 || index >= DEFAULT_EQ_DB.length) return 0;
-        int val = sp.getInt("eq_band_" + index, DEFAULT_EQ_DB[index]);
-        return Math.max(EQ_MIN_DB, Math.min(EQ_MAX_DB, val));
-    }
-
-    public void setEqBandDb(int index, int db) {
-        if (index < 0 || index >= DEFAULT_EQ_DB.length) return;
-        int clamped = Math.max(EQ_MIN_DB, Math.min(EQ_MAX_DB, db));
-        sp.edit().putInt("eq_band_" + index, clamped).apply();
-    }
-
+    // --- Independent Output Limiter Settings ---
     public boolean isLimiterEnabled() {
         return sp.getBoolean("limiter_enabled", true);
     }
@@ -202,6 +207,51 @@ public final class Prefs {
         sp.edit().putBoolean("limiter_enabled", v).apply();
     }
 
+    public float getLimiterThresholdDb() {
+        float val = sp.getFloat("limiter_threshold_db", -0.1f);
+        return Math.max(-6.0f, Math.min(0.0f, val));
+    }
+
+    public void setLimiterThresholdDb(float db) {
+        float clamped = Math.max(-6.0f, Math.min(0.0f, db));
+        sp.edit().putFloat("limiter_threshold_db", clamped).apply();
+    }
+
+    public int getLimiterReleaseMs() {
+        int val = sp.getInt("limiter_release_ms", 500);
+        return Math.max(10, Math.min(500, val));
+    }
+
+    public void setLimiterReleaseMs(int ms) {
+        int clamped = Math.max(10, Math.min(500, ms));
+        sp.edit().putInt("limiter_release_ms", clamped).apply();
+    }
+
+    // Apply a preset template into all independent settings
+    public void applyPresetTemplate(
+        float[] eqBands,
+        int makeupDb,
+        boolean stereoOn,
+        int stageWidthPct,
+        boolean limiterOn,
+        float limiterThresholdDb,
+        int limiterReleaseMs
+    ) {
+        SharedPreferences.Editor ed = sp.edit();
+        ed.putBoolean("eq_enabled", true);
+        ed.putInt("eq_makeup_db", Math.max(0, Math.min(15, makeupDb)));
+        for (int i = 0; i < EQ_FREQS_HZ.length && i < eqBands.length; i++) {
+            ed.putFloat("eq19_band_" + i, Math.max(EQ_MIN_DB, Math.min(EQ_MAX_DB, eqBands[i])));
+        }
+        ed.putBoolean("stereo_wide_enabled", stereoOn);
+        ed.putInt("stage_width_pct", Math.max(0, Math.min(100, stageWidthPct)));
+        ed.putBoolean("limiter_enabled", limiterOn);
+        ed.putFloat("limiter_threshold_db", Math.max(-6.0f, Math.min(0.0f, limiterThresholdDb)));
+        ed.putInt("limiter_release_ms", Math.max(10, Math.min(500, limiterReleaseMs)));
+        ed.apply();
+    }
+
+    // --- System ---
     public boolean isSpeakerOnly() {
         return sp.getBoolean("speaker_only", true);
     }

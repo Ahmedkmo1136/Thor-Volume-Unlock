@@ -31,7 +31,6 @@ public final class AppSwitchAccessibilityService extends AccessibilityService {
         if (pkgSeq == null || pkgSeq.length() == 0) return;
 
         String pkg = pkgSeq.toString();
-        // Ignore transient overlays (SystemUI, volume panels, keyboards, and this settings UI)
         if (pkg.equals("com.android.systemui")
             || pkg.equals("android")
             || pkg.equals(getPackageName())

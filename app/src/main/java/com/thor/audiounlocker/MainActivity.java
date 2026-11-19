@@ -25,6 +25,7 @@ import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 
 public final class MainActivity extends Activity {
 
@@ -36,11 +37,25 @@ public final class MainActivity extends Activity {
     private TextView accBannerView;
     private Button addAppBtn;
     private LinearLayout perAppListContainer;
-    private TextView activeProfileView;
+
+    // Independent DSP UI references (updated whenever a preset template is loaded)
+    private Switch stereoWideSwitch;
     private TextView widthValueView;
     private SeekBar widthSlider;
-    private final SeekBar[] eqSliders = new SeekBar[Prefs.EQ_CUTOFFS_HZ.length];
-    private final TextView[] eqValueViews = new TextView[Prefs.EQ_CUTOFFS_HZ.length];
+    private Switch limiterSwitch;
+    private TextView limThreshValueView;
+    private SeekBar limThreshSlider;
+    private TextView limReleaseValueView;
+    private SeekBar limReleaseSlider;
+    private Switch eqSwitch;
+    private TextView makeupValueView;
+    private SeekBar makeupSlider;
+    private LinearLayout eqBandsContainer;
+    private Button toggleBandsBtn;
+    private final SeekBar[] eqSliders = new SeekBar[Prefs.EQ_FREQS_HZ.length];
+    private final TextView[] eqValueViews = new TextView[Prefs.EQ_FREQS_HZ.length];
+    private boolean bandsVisible = false;
+    private boolean syncingUi = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -103,7 +118,7 @@ public final class MainActivity extends Activity {
         statusView.setPadding(0, dp(4), 0, dp(14));
         root.addView(statusView);
 
-        // 1. Global Gain Card (baseline for all apps)
+        // 1. Global Gain Card
         LinearLayout gainCard = makeCard();
         root.addView(gainCard);
 
@@ -167,7 +182,7 @@ public final class MainActivity extends Activity {
             }
         );
 
-        // 2. Per-App Overrides Card (replaces Global dB for specific apps without conflict)
+        // 2. Per-App Overrides Card
         LinearLayout perAppCard = makeCard();
         root.addView(perAppCard);
 
@@ -191,7 +206,6 @@ public final class MainActivity extends Activity {
             }
         );
 
-        // Clear Accessibility requirement banner
         accBannerView = new TextView(this);
         accBannerView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         accBannerView.setPadding(dp(12), dp(10), dp(12), dp(10));
@@ -249,28 +263,26 @@ public final class MainActivity extends Activity {
         updateAccessibilityUi();
         rebuildPerAppList();
 
-        // 3. Stereo Stage Widener & Equalizer Profiles Card
-        LinearLayout eqCard = makeCard();
-        root.addView(eqCard);
+        // 3. Quick Preset Templates Card (populates independent EQ, Stereo, and Limiter controls)
+        LinearLayout presetCard = makeCard();
+        root.addView(presetCard);
 
-        TextView eqTitle = new TextView(this);
-        eqTitle.setText("Equalizer Profiles & Stereo Stage");
-        eqTitle.setTextColor(Color.WHITE);
-        eqTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        eqTitle.setTypeface(null, Typeface.BOLD);
-        eqTitle.setPadding(0, 0, 0, dp(4));
-        eqCard.addView(eqTitle);
+        TextView presetTitle = new TextView(this);
+        presetTitle.setText("Quick Profiles (Templates)");
+        presetTitle.setTextColor(Color.WHITE);
+        presetTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        presetTitle.setTypeface(null, Typeface.BOLD);
+        presetCard.addView(presetTitle);
 
-        activeProfileView = new TextView(this);
-        activeProfileView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        activeProfileView.setTextColor(Color.parseColor("#38BDF8"));
-        activeProfileView.setPadding(0, 0, 0, dp(8));
-        updateActiveProfileLabel();
-        eqCard.addView(activeProfileView);
+        TextView presetSub = new TextView(this);
+        presetSub.setText("Tap a profile to load its EQ, stereo width, and limiter values. Every control below stays fully customizable.");
+        presetSub.setTextColor(Color.parseColor("#94A3B8"));
+        presetSub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        presetSub.setPadding(0, dp(4), 0, dp(10));
+        presetCard.addView(presetSub);
 
-        // Joey's Profile featured button
         Button joeyBtn = new Button(this);
-        joeyBtn.setText("Load Joey's Retro Handhelds Profile (19-Band Thor EQ)");
+        joeyBtn.setText("Load Joey's Retro Handhelds Profile (19-Band + 40% Stereo)");
         joeyBtn.setAllCaps(false);
         joeyBtn.setTextColor(Color.parseColor("#0B1120"));
         joeyBtn.setTypeface(null, Typeface.BOLD);
@@ -280,36 +292,38 @@ public final class MainActivity extends Activity {
         );
         joeyLp.bottomMargin = dp(8);
         joeyBtn.setLayoutParams(joeyLp);
-        joeyBtn.setOnClickListener(v -> {
-            prefs.setEqEnabled(true);
-            prefs.setEqProfile(Prefs.PROFILE_JOEY);
-            prefs.setStereoWideEnabled(true);
-            prefs.setStageWidthPercent(80);
-            prefs.setLimiterEnabled(true);
-            if (widthSlider != null) widthSlider.setProgress(80);
-            if (widthValueView != null) widthValueView.setText("80%");
-            updateActiveProfileLabel();
-            pushServiceUpdate();
-        });
-        eqCard.addView(joeyBtn);
+        joeyBtn.setOnClickListener(v -> loadPresetAndRefresh(
+            Prefs.PRESET_JOEY_EQ, 11, true, 40, true, -0.1f, 500
+        ));
+        presetCard.addView(joeyBtn);
 
-        // Quick 5-band presets
-        LinearLayout eqPresets = new LinearLayout(this);
-        eqPresets.setOrientation(LinearLayout.HORIZONTAL);
-        eqPresets.setPadding(0, 0, 0, dp(10));
-        eqCard.addView(eqPresets);
+        LinearLayout presetRow = new LinearLayout(this);
+        presetRow.setOrientation(LinearLayout.HORIZONTAL);
+        presetCard.addView(presetRow);
 
-        addPresetBtn(eqPresets, "Wide Stage", Prefs.PROFILE_WIDE, new int[]{-2, 1, 2, 3, 3}, 75);
-        addPresetBtn(eqPresets, "Vocal Clear", Prefs.PROFILE_VOCAL, new int[]{-3, 0, 4, 3, 1}, 50);
-        addPresetBtn(eqPresets, "Flat", Prefs.PROFILE_FLAT, new int[]{0, 0, 0, 0, 0}, 0);
+        addPresetBtn(presetRow, "Wide Stage", Prefs.PRESET_WIDE_EQ, 0, true, 70, true, -0.5f, 60);
+        addPresetBtn(presetRow, "Vocal Clear", Prefs.PRESET_VOCAL_EQ, 0, true, 45, true, -0.5f, 60);
+        addPresetBtn(presetRow, "Flat", Prefs.PRESET_FLAT_EQ, 0, false, 0, true, -0.5f, 60);
 
-        addSwitchRow(
-            eqCard,
-            "Stereo Stage Widener",
-            "Combines Virtualizer + L/R complementary EQ tilt for a wider soundstage",
+        // 4. Independent Stereo Stage Card
+        LinearLayout stereoCard = makeCard();
+        root.addView(stereoCard);
+
+        TextView stereoTitle = new TextView(this);
+        stereoTitle.setText("Stereo Stage Widener");
+        stereoTitle.setTextColor(Color.WHITE);
+        stereoTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        stereoTitle.setTypeface(null, Typeface.BOLD);
+        stereoCard.addView(stereoTitle);
+
+        stereoWideSwitch = addSwitchRow(
+            stereoCard,
+            "Enable Stereo Widener",
+            "Combines Virtualizer + L/R complementary EQ tilt for wider soundstage",
             Color.parseColor("#94A3B8"),
             prefs.isStereoWideEnabled(),
             checked -> {
+                if (syncingUi) return;
                 prefs.setStereoWideEnabled(checked);
                 pushServiceUpdate();
             }
@@ -318,7 +332,7 @@ public final class MainActivity extends Activity {
         LinearLayout widthHeader = new LinearLayout(this);
         widthHeader.setOrientation(LinearLayout.HORIZONTAL);
         widthHeader.setPadding(0, dp(6), 0, 0);
-        eqCard.addView(widthHeader);
+        stereoCard.addView(widthHeader);
 
         TextView widthLabel = new TextView(this);
         widthLabel.setText("Stage Width");
@@ -336,12 +350,12 @@ public final class MainActivity extends Activity {
         widthSlider = new SeekBar(this);
         widthSlider.setMax(100);
         widthSlider.setProgress(prefs.getStageWidthPercent());
-        widthSlider.setPadding(0, dp(6), 0, dp(10));
+        widthSlider.setPadding(0, dp(6), 0, dp(4));
         widthSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 widthValueView.setText(progress + "%");
-                if (fromUser) {
+                if (fromUser && !syncingUi) {
                     prefs.setStageWidthPercent(progress);
                     pushServiceUpdate();
                 }
@@ -349,27 +363,197 @@ public final class MainActivity extends Activity {
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
-        eqCard.addView(widthSlider);
+        stereoCard.addView(widthSlider);
 
-        addSwitchRow(
+        // 5. Independent Output Limiter Card
+        LinearLayout limiterCard = makeCard();
+        root.addView(limiterCard);
+
+        TextView limiterTitle = new TextView(this);
+        limiterTitle.setText("Output Limiter");
+        limiterTitle.setTextColor(Color.WHITE);
+        limiterTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        limiterTitle.setTypeface(null, Typeface.BOLD);
+        limiterCard.addView(limiterTitle);
+
+        limiterSwitch = addSwitchRow(
+            limiterCard,
+            "Enable Output Limiter",
+            "Prevents harsh digital clipping independently of any profile",
+            Color.parseColor("#94A3B8"),
+            prefs.isLimiterEnabled(),
+            checked -> {
+                if (syncingUi) return;
+                prefs.setLimiterEnabled(checked);
+                pushServiceUpdate();
+            }
+        );
+
+        // Limiter Threshold (-6.0 to 0.0 dB)
+        LinearLayout threshHeader = new LinearLayout(this);
+        threshHeader.setOrientation(LinearLayout.HORIZONTAL);
+        threshHeader.setPadding(0, dp(6), 0, 0);
+        limiterCard.addView(threshHeader);
+
+        TextView threshLabel = new TextView(this);
+        threshLabel.setText("Limiter Threshold");
+        threshLabel.setTextColor(Color.parseColor("#E2E8F0"));
+        threshLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        threshLabel.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        threshHeader.addView(threshLabel);
+
+        limThreshValueView = new TextView(this);
+        limThreshValueView.setText(String.format(Locale.US, "%.1f dB", prefs.getLimiterThresholdDb()));
+        limThreshValueView.setTextColor(Color.parseColor("#38BDF8"));
+        limThreshValueView.setTypeface(null, Typeface.BOLD);
+        threshHeader.addView(limThreshValueView);
+
+        limThreshSlider = new SeekBar(this);
+        limThreshSlider.setMax(60); // 0..60 maps to -6.0..0.0 dB
+        limThreshSlider.setProgress(Math.round((prefs.getLimiterThresholdDb() + 6.0f) * 10f));
+        limThreshSlider.setPadding(0, dp(4), 0, dp(8));
+        limThreshSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                float db = -6.0f + (progress * 0.1f);
+                limThreshValueView.setText(String.format(Locale.US, "%.1f dB", db));
+                if (fromUser && !syncingUi) {
+                    prefs.setLimiterThresholdDb(db);
+                    pushServiceUpdate();
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        limiterCard.addView(limThreshSlider);
+
+        // Limiter Release (10 ms to 500 ms)
+        LinearLayout relHeader = new LinearLayout(this);
+        relHeader.setOrientation(LinearLayout.HORIZONTAL);
+        limiterCard.addView(relHeader);
+
+        TextView relLabel = new TextView(this);
+        relLabel.setText("Limiter Release Time");
+        relLabel.setTextColor(Color.parseColor("#E2E8F0"));
+        relLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        relLabel.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        relHeader.addView(relLabel);
+
+        limReleaseValueView = new TextView(this);
+        limReleaseValueView.setText(prefs.getLimiterReleaseMs() + " ms");
+        limReleaseValueView.setTextColor(Color.parseColor("#38BDF8"));
+        limReleaseValueView.setTypeface(null, Typeface.BOLD);
+        relHeader.addView(limReleaseValueView);
+
+        limReleaseSlider = new SeekBar(this);
+        limReleaseSlider.setMax(49); // 0..49 maps to 10..500 ms in 10 ms steps
+        limReleaseSlider.setProgress((prefs.getLimiterReleaseMs() - 10) / 10);
+        limReleaseSlider.setPadding(0, dp(4), 0, dp(4));
+        limReleaseSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int ms = 10 + (progress * 10);
+                limReleaseValueView.setText(ms + " ms");
+                if (fromUser && !syncingUi) {
+                    prefs.setLimiterReleaseMs(ms);
+                    pushServiceUpdate();
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        limiterCard.addView(limReleaseSlider);
+
+        // 6. Independent 19-Band Equalizer Card
+        LinearLayout eqCard = makeCard();
+        root.addView(eqCard);
+
+        TextView eqTitle = new TextView(this);
+        eqTitle.setText("19-Band Equalizer");
+        eqTitle.setTextColor(Color.WHITE);
+        eqTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        eqTitle.setTypeface(null, Typeface.BOLD);
+        eqCard.addView(eqTitle);
+
+        eqSwitch = addSwitchRow(
             eqCard,
-            "Enable Equalizer",
-            "Adjusting any slider below switches to Custom 5-Band EQ",
+            "Enable 19-Band Equalizer",
+            "All 19 frequency bands (-32.0 to +12.0 dB) are independently editable",
             Color.parseColor("#94A3B8"),
             prefs.isEqEnabled(),
             checked -> {
+                if (syncingUi) return;
                 prefs.setEqEnabled(checked);
                 pushServiceUpdate();
             }
         );
 
-        for (int i = 0; i < Prefs.EQ_CUTOFFS_HZ.length; i++) {
+        // EQ Makeup Gain (0 to +15 dB)
+        LinearLayout makeupHeader = new LinearLayout(this);
+        makeupHeader.setOrientation(LinearLayout.HORIZONTAL);
+        makeupHeader.setPadding(0, dp(6), 0, 0);
+        eqCard.addView(makeupHeader);
+
+        TextView makeupLabel = new TextView(this);
+        makeupLabel.setText("EQ Makeup Gain (Compensates Heavy Cuts)");
+        makeupLabel.setTextColor(Color.parseColor("#E2E8F0"));
+        makeupLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        makeupLabel.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        makeupHeader.addView(makeupLabel);
+
+        makeupValueView = new TextView(this);
+        makeupValueView.setText("+" + prefs.getEqMakeupDb() + " dB");
+        makeupValueView.setTextColor(Color.parseColor("#38BDF8"));
+        makeupValueView.setTypeface(null, Typeface.BOLD);
+        makeupHeader.addView(makeupValueView);
+
+        makeupSlider = new SeekBar(this);
+        makeupSlider.setMax(15);
+        makeupSlider.setProgress(prefs.getEqMakeupDb());
+        makeupSlider.setPadding(0, dp(4), 0, dp(10));
+        makeupSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                makeupValueView.setText("+" + progress + " dB");
+                if (fromUser && !syncingUi) {
+                    prefs.setEqMakeupDb(progress);
+                    pushServiceUpdate();
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        eqCard.addView(makeupSlider);
+
+        toggleBandsBtn = new Button(this);
+        toggleBandsBtn.setText("Show 19-Band EQ Sliders");
+        toggleBandsBtn.setAllCaps(false);
+        toggleBandsBtn.setTextColor(Color.WHITE);
+        toggleBandsBtn.setBackground(makeRoundedBg("#1E293B", 10));
+        LinearLayout.LayoutParams tbLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(40)
+        );
+        toggleBandsBtn.setLayoutParams(tbLp);
+        toggleBandsBtn.setOnClickListener(v -> {
+            bandsVisible = !bandsVisible;
+            eqBandsContainer.setVisibility(bandsVisible ? View.VISIBLE : View.GONE);
+            toggleBandsBtn.setText(bandsVisible ? "Hide 19-Band EQ Sliders" : "Show 19-Band EQ Sliders");
+        });
+        eqCard.addView(toggleBandsBtn);
+
+        eqBandsContainer = new LinearLayout(this);
+        eqBandsContainer.setOrientation(LinearLayout.VERTICAL);
+        eqBandsContainer.setPadding(0, dp(10), 0, 0);
+        eqBandsContainer.setVisibility(View.GONE);
+        eqCard.addView(eqBandsContainer);
+
+        for (int i = 0; i < Prefs.EQ_FREQS_HZ.length; i++) {
             final int bandIndex = i;
-            int currentDb = prefs.getEqBandDb(i);
+            float currentDb = prefs.getEqBandDb(i);
 
             LinearLayout bandHeader = new LinearLayout(this);
             bandHeader.setOrientation(LinearLayout.HORIZONTAL);
-            eqCard.addView(bandHeader);
+            eqBandsContainer.addView(bandHeader);
 
             TextView bandLabel = new TextView(this);
             bandLabel.setText(Prefs.EQ_LABELS[i]);
@@ -379,7 +563,7 @@ public final class MainActivity extends Activity {
             bandHeader.addView(bandLabel);
 
             TextView bandVal = new TextView(this);
-            bandVal.setText(formatSignedDb(currentDb));
+            bandVal.setText(formatSignedHalfDb(currentDb));
             bandVal.setTextColor(Color.parseColor("#38BDF8"));
             bandVal.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
             bandVal.setTypeface(null, Typeface.BOLD);
@@ -387,41 +571,33 @@ public final class MainActivity extends Activity {
             eqValueViews[i] = bandVal;
 
             SeekBar sb = new SeekBar(this);
-            sb.setMax(Prefs.EQ_MAX_DB - Prefs.EQ_MIN_DB);
-            sb.setProgress(currentDb - Prefs.EQ_MIN_DB);
-            sb.setPadding(0, dp(4), 0, dp(8));
+            sb.setMax(Prefs.EQ_SLIDER_STEPS);
+            sb.setProgress(dbToSlider(currentDb));
+            sb.setPadding(0, dp(2), 0, dp(8));
             sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 @Override
                 public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                    int db = progress + Prefs.EQ_MIN_DB;
-                    bandVal.setText(formatSignedDb(db));
-                    if (fromUser) {
-                        prefs.setEqProfile(Prefs.PROFILE_CUSTOM);
+                    float db = sliderToDb(progress);
+                    bandVal.setText(formatSignedHalfDb(db));
+                    if (fromUser && !syncingUi) {
                         prefs.setEqBandDb(bandIndex, db);
-                        updateActiveProfileLabel();
                         pushServiceUpdate();
                     }
                 }
                 @Override public void onStartTrackingTouch(SeekBar seekBar) {}
                 @Override public void onStopTrackingTouch(SeekBar seekBar) {}
             });
-            eqCard.addView(sb);
+            eqBandsContainer.addView(sb);
             eqSliders[i] = sb;
         }
 
-        // 4. Service & Protection Card
+        // 7. System Card
         LinearLayout settingsCard = makeCard();
         root.addView(settingsCard);
 
         addSwitchRow(settingsCard, "Enable Boost Service", "Runs in native audio server with minimal RAM",
             Color.parseColor("#94A3B8"), prefs.isEnabled(), checked -> {
                 prefs.setEnabled(checked);
-                pushServiceUpdate();
-            });
-
-        addSwitchRow(settingsCard, "Output Limiter", "Keeps loudness clean and prevents harsh digital clipping",
-            Color.parseColor("#94A3B8"), prefs.isLimiterEnabled(), checked -> {
-                prefs.setLimiterEnabled(checked);
                 pushServiceUpdate();
             });
 
@@ -454,20 +630,62 @@ public final class MainActivity extends Activity {
         return scroll;
     }
 
-    private void updateActiveProfileLabel() {
-        if (activeProfileView == null) return;
-        String p = prefs.getEqProfile();
-        if (Prefs.PROFILE_JOEY.equals(p)) {
-            activeProfileView.setText("Active Profile: Joey's Retro Handhelds (19-Band Thor EQ + 500ms Limiter)");
-        } else if (Prefs.PROFILE_WIDE.equals(p)) {
-            activeProfileView.setText("Active Profile: Wide Stage (5-Band EQ)");
-        } else if (Prefs.PROFILE_VOCAL.equals(p)) {
-            activeProfileView.setText("Active Profile: Vocal Clear (5-Band EQ)");
-        } else if (Prefs.PROFILE_FLAT.equals(p)) {
-            activeProfileView.setText("Active Profile: Flat (0 dB EQ)");
-        } else {
-            activeProfileView.setText("Active Profile: Custom 5-Band EQ");
+    private void loadPresetAndRefresh(
+        float[] eqBands,
+        int makeupDb,
+        boolean stereoOn,
+        int stageWidthPct,
+        boolean limiterOn,
+        float limiterThresholdDb,
+        int limiterReleaseMs
+    ) {
+        prefs.applyPresetTemplate(eqBands, makeupDb, stereoOn, stageWidthPct, limiterOn, limiterThresholdDb, limiterReleaseMs);
+        syncingUi = true;
+        try {
+            if (eqSwitch != null) eqSwitch.setChecked(prefs.isEqEnabled());
+            if (makeupSlider != null) makeupSlider.setProgress(prefs.getEqMakeupDb());
+            if (makeupValueView != null) makeupValueView.setText("+" + prefs.getEqMakeupDb() + " dB");
+            for (int i = 0; i < Prefs.EQ_FREQS_HZ.length; i++) {
+                float db = prefs.getEqBandDb(i);
+                if (eqSliders[i] != null) eqSliders[i].setProgress(dbToSlider(db));
+                if (eqValueViews[i] != null) eqValueViews[i].setText(formatSignedHalfDb(db));
+            }
+            if (stereoWideSwitch != null) stereoWideSwitch.setChecked(prefs.isStereoWideEnabled());
+            if (widthSlider != null) widthSlider.setProgress(prefs.getStageWidthPercent());
+            if (widthValueView != null) widthValueView.setText(prefs.getStageWidthPercent() + "%");
+            if (limiterSwitch != null) limiterSwitch.setChecked(prefs.isLimiterEnabled());
+            if (limThreshSlider != null) limThreshSlider.setProgress(Math.round((prefs.getLimiterThresholdDb() + 6.0f) * 10f));
+            if (limThreshValueView != null) limThreshValueView.setText(String.format(Locale.US, "%.1f dB", prefs.getLimiterThresholdDb()));
+            if (limReleaseSlider != null) limReleaseSlider.setProgress((prefs.getLimiterReleaseMs() - 10) / 10);
+            if (limReleaseValueView != null) limReleaseValueView.setText(prefs.getLimiterReleaseMs() + " ms");
+        } finally {
+            syncingUi = false;
         }
+        pushServiceUpdate();
+    }
+
+    private void addPresetBtn(
+        LinearLayout row,
+        String label,
+        float[] bands,
+        int makeupDb,
+        boolean stereoOn,
+        int widthPct,
+        boolean limOn,
+        float limThresh,
+        int limRelMs
+    ) {
+        Button b = new Button(this);
+        b.setText(label);
+        b.setAllCaps(false);
+        b.setTextColor(Color.WHITE);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        b.setBackground(makeRoundedBg("#1E293B", 10));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(38), 1f);
+        lp.setMargins(dp(4), 0, dp(4), 0);
+        b.setLayoutParams(lp);
+        b.setOnClickListener(v -> loadPresetAndRefresh(bands, makeupDb, stereoOn, widthPct, limOn, limThresh, limRelMs));
+        row.addView(b);
     }
 
     private void updateAccessibilityUi() {
@@ -608,31 +826,16 @@ public final class MainActivity extends Activity {
             .show();
     }
 
-    private void addPresetBtn(LinearLayout row, String label, String profileId, int[] bands, int widthPct) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setAllCaps(false);
-        b.setTextColor(Color.WHITE);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        b.setBackground(makeRoundedBg("#1E293B", 10));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(38), 1f);
-        lp.setMargins(dp(4), 0, dp(4), 0);
-        b.setLayoutParams(lp);
-        b.setOnClickListener(v -> {
-            prefs.setEqEnabled(true);
-            prefs.setEqProfile(profileId);
-            for (int i = 0; i < bands.length; i++) {
-                prefs.setEqBandDb(i, bands[i]);
-                if (eqSliders[i] != null) eqSliders[i].setProgress(bands[i] - Prefs.EQ_MIN_DB);
-                if (eqValueViews[i] != null) eqValueViews[i].setText(formatSignedDb(bands[i]));
-            }
-            prefs.setStageWidthPercent(widthPct);
-            if (widthSlider != null) widthSlider.setProgress(widthPct);
-            if (widthValueView != null) widthValueView.setText(widthPct + "%");
-            updateActiveProfileLabel();
-            pushServiceUpdate();
-        });
-        row.addView(b);
+    private int dbToSlider(float db) {
+        return Math.max(0, Math.min(Prefs.EQ_SLIDER_STEPS, Math.round((db - Prefs.EQ_MIN_DB) * 2.0f)));
+    }
+
+    private float sliderToDb(int progress) {
+        return Prefs.EQ_MIN_DB + (progress * 0.5f);
+    }
+
+    private String formatSignedHalfDb(float db) {
+        return String.format(Locale.US, "%+.1f dB", db);
     }
 
     private void updateGainReadout(int db) {
@@ -652,15 +855,11 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private String formatSignedDb(int db) {
-        return (db > 0 ? "+" : "") + db + " dB";
-    }
-
     private interface ToggleListener {
         void onToggle(boolean checked);
     }
 
-    private void addSwitchRow(
+    private Switch addSwitchRow(
         LinearLayout parent,
         String title,
         String subtitle,
@@ -697,6 +896,7 @@ public final class MainActivity extends Activity {
         row.addView(textCol);
         row.addView(sw);
         parent.addView(row);
+        return sw;
     }
 
     private LinearLayout makeCard() {
