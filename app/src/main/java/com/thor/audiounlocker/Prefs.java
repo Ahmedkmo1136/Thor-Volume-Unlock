@@ -13,9 +13,9 @@ public final class Prefs {
     public static final int SAFE_MAX_DB = 10;
     public static final int EXTRA_MAX_DB = 20;
 
-    public static final float EQ_MIN_DB = -32.0f;
+    public static final float EQ_MIN_DB = -12.0f;
     public static final float EQ_MAX_DB = 12.0f;
-    public static final int EQ_SLIDER_STEPS = 88; // 0.5 dB steps from -32.0 to +12.0
+    public static final int EQ_SLIDER_STEPS = 48; // 0.5 dB steps from -12.0 to +12.0 (0 dB centered)
 
     public static final float[] EQ_FREQS_HZ = {
         70f, 110f, 120f, 200f, 300f, 444f, 600f, 700f, 850f,
@@ -27,25 +27,43 @@ public final class Prefs {
         "1.2 kHz", "1.86 kHz", "2.8 kHz", "3.8 kHz", "5 kHz", "7 kHz", "9.05 kHz", "11 kHz", "12 kHz", "16 kHz"
     };
 
-    // Preset templates (selecting a preset copies its values into the independent settings below)
-    public static final float[] PRESET_JOEY_EQ = {
-        -32.0f, -4.5f, -4.0f, -4.0f, -5.0f, -9.0f, -13.5f, -17.0f, -17.0f,
-        -18.5f, -20.0f, -19.5f, -21.5f, -13.0f, -6.0f, -0.5f, 0.5f, -0.5f, -3.0f
-    };
-    public static final float[] PRESET_WIDE_EQ = {
-        -6.0f, -2.0f, -1.0f, 0.5f, 1.0f, 1.0f, 1.5f, 2.0f, 2.0f,
-        2.5f, 2.5f, 3.0f, 3.0f, 2.5f, 2.5f, 2.5f, 3.0f, 2.5f, 1.5f
-    };
-    public static final float[] PRESET_VOCAL_EQ = {
-        -8.0f, -3.0f, -2.0f, 0.0f, 0.5f, 1.5f, 2.5f, 3.5f, 4.0f,
-        4.0f, 3.5f, 3.0f, 2.5f, 1.5f, 1.0f, 0.5f, 0.5f, 0.0f, -1.0f
-    };
-    public static final float[] PRESET_FLAT_EQ = {
+    // 1. Normal (Flat) - Default
+    public static final float[] PRESET_NORMAL_EQ = {
         0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f,
         0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f
     };
 
-    private static final String NAME = "thor_boost_prefs_v71";
+    // 2. Similar to Joey Retro Profile (re-scaled cleanly for Android IIR EQ without crushing sound)
+    public static final float[] PRESET_SIMILAR_JOEY_EQ = {
+        -8.0f, 2.5f, 3.0f, 3.0f, 2.0f, 0.0f, -2.0f, -3.5f, -3.5f,
+        -4.5f, -5.0f, -4.5f, -5.5f, -2.0f, 1.0f, 3.5f, 4.5f, 3.5f, 2.0f
+    };
+
+    // 3. Stereo Widening (Lite Joey) - lighter tonal touch focused on open stereo stage
+    public static final float[] PRESET_STEREO_LITE_EQ = {
+        -4.0f, 1.5f, 1.5f, 1.5f, 1.0f, 0.0f, -1.0f, -1.5f, -1.5f,
+        -2.0f, -2.0f, -1.5f, -2.0f, -0.5f, 1.0f, 2.5f, 3.0f, 2.5f, 1.5f
+    };
+
+    // 4. Bass & Punch (warm handheld low-end without sub-bass rattle)
+    public static final float[] PRESET_BASS_PUNCH_EQ = {
+        -4.0f, 4.0f, 4.5f, 4.0f, 2.5f, 1.0f, 0.0f, -0.5f, -0.5f,
+        0.0f, 0.5f, 1.0f, 1.5f, 1.5f, 2.0f, 2.0f, 2.0f, 1.5f, 1.0f
+    };
+
+    // 5. Vocal & Dialogue (brings speech & RPG narration forward)
+    public static final float[] PRESET_VOCAL_EQ = {
+        -5.0f, -2.0f, -1.5f, -0.5f, 0.5f, 1.5f, 2.5f, 3.5f, 4.0f,
+        4.5f, 4.0f, 3.5f, 2.5f, 1.5f, 1.0f, 0.5f, 0.5f, 0.0f, -0.5f
+    };
+
+    // 6. Crisp Retro (clean clarity for retro & indie games)
+    public static final float[] PRESET_CRISP_RETRO_EQ = {
+        -3.0f, 2.0f, 2.0f, 1.5f, 1.0f, 0.5f, 0.0f, 0.0f, 0.5f,
+        1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 3.5f, 3.5f, 4.0f, 3.0f, 2.0f
+    };
+
+    private static final String NAME = "thor_boost_prefs_v72";
     private static final String KEY_PER_APP_PKGS = "per_app_packages";
     private final SharedPreferences sp;
 
@@ -86,7 +104,7 @@ public final class Prefs {
     }
 
     public int getGainDb() {
-        int val = sp.getInt("gain_db", 8);
+        int val = sp.getInt("gain_db", 6);
         return Math.max(0, Math.min(getCurrentMaxDb(), val));
     }
 
@@ -148,7 +166,7 @@ public final class Prefs {
         return sp.getString("per_app_label_" + pkg, pkg);
     }
 
-    // --- Independent 19-Band Equalizer Settings ---
+    // --- Independent 19-Band Equalizer Settings (Default: Normal / Flat) ---
     public boolean isEqEnabled() {
         return sp.getBoolean("eq_enabled", true);
     }
@@ -158,18 +176,18 @@ public final class Prefs {
     }
 
     public int getEqMakeupDb() {
-        int val = sp.getInt("eq_makeup_db", 16);
-        return Math.max(0, Math.min(20, val));
+        int val = sp.getInt("eq_makeup_db", 0);
+        return Math.max(0, Math.min(12, val));
     }
 
     public void setEqMakeupDb(int db) {
-        int clamped = Math.max(0, Math.min(20, db));
+        int clamped = Math.max(0, Math.min(12, db));
         sp.edit().putInt("eq_makeup_db", clamped).apply();
     }
 
     public float getEqBandDb(int index) {
         if (index < 0 || index >= EQ_FREQS_HZ.length) return 0f;
-        float val = sp.getFloat("eq19_band_" + index, PRESET_JOEY_EQ[index]);
+        float val = sp.getFloat("eq19_band_" + index, PRESET_NORMAL_EQ[index]);
         return Math.max(EQ_MIN_DB, Math.min(EQ_MAX_DB, val));
     }
 
@@ -181,7 +199,7 @@ public final class Prefs {
 
     // --- Independent Stereo Widener Settings ---
     public boolean isStereoWideEnabled() {
-        return sp.getBoolean("stereo_wide_enabled", true);
+        return sp.getBoolean("stereo_wide_enabled", false);
     }
 
     public void setStereoWideEnabled(boolean v) {
@@ -189,7 +207,7 @@ public final class Prefs {
     }
 
     public int getStageWidthPercent() {
-        int v = sp.getInt("stage_width_pct", 40);
+        int v = sp.getInt("stage_width_pct", 0);
         return Math.max(0, Math.min(100, v));
     }
 
@@ -208,7 +226,7 @@ public final class Prefs {
     }
 
     public float getLimiterThresholdDb() {
-        float val = sp.getFloat("limiter_threshold_db", -0.1f);
+        float val = sp.getFloat("limiter_threshold_db", -0.5f);
         return Math.max(-6.0f, Math.min(0.0f, val));
     }
 
@@ -218,7 +236,7 @@ public final class Prefs {
     }
 
     public int getLimiterReleaseMs() {
-        int val = sp.getInt("limiter_release_ms", 500);
+        int val = sp.getInt("limiter_release_ms", 60);
         return Math.max(10, Math.min(500, val));
     }
 
@@ -227,7 +245,6 @@ public final class Prefs {
         sp.edit().putInt("limiter_release_ms", clamped).apply();
     }
 
-    // Apply a preset template into all independent settings
     public void applyPresetTemplate(
         float[] eqBands,
         int makeupDb,
@@ -239,7 +256,7 @@ public final class Prefs {
     ) {
         SharedPreferences.Editor ed = sp.edit();
         ed.putBoolean("eq_enabled", true);
-        ed.putInt("eq_makeup_db", Math.max(0, Math.min(20, makeupDb)));
+        ed.putInt("eq_makeup_db", Math.max(0, Math.min(12, makeupDb)));
         for (int i = 0; i < EQ_FREQS_HZ.length && i < eqBands.length; i++) {
             ed.putFloat("eq19_band_" + i, Math.max(EQ_MIN_DB, Math.min(EQ_MAX_DB, eqBands[i])));
         }

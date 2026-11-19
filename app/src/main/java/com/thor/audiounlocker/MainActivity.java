@@ -200,7 +200,7 @@ public final class MainActivity extends Activity {
             tb.setAllCaps(false);
             tb.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
             tb.setTypeface(null, Typeface.BOLD);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(38), 1f);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(52), 1f);
             tb.setLayoutParams(lp);
             tb.setOnClickListener(v -> selectTab(idx));
             tabButtons[i] = tb;
@@ -470,29 +470,25 @@ public final class MainActivity extends Activity {
         presetSub.setPadding(0, dp(3), 0, dp(10));
         presetCard.addView(presetSub);
 
-        Button joeyBtn = new Button(this);
-        joeyBtn.setText("Joey's Retro Handhelds (19-Band EQ • 40% Stereo)");
-        joeyBtn.setAllCaps(false);
-        joeyBtn.setTextColor(Color.parseColor(BG_DARK));
-        joeyBtn.setTypeface(null, Typeface.BOLD);
-        joeyBtn.setBackground(makeRoundedBg(ACCENT, 10, null));
-        LinearLayout.LayoutParams joeyLp = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(42)
-        );
-        joeyLp.bottomMargin = dp(8);
-        joeyBtn.setLayoutParams(joeyLp);
-        joeyBtn.setOnClickListener(v -> loadPresetAndRefresh(
-            Prefs.PRESET_JOEY_EQ, 16, true, 40, true, -0.1f, 500
-        ));
-        presetCard.addView(joeyBtn);
+        LinearLayout row1 = new LinearLayout(this);
+        row1.setOrientation(LinearLayout.HORIZONTAL);
+        row1.setPadding(0, 0, 0, dp(8));
+        presetCard.addView(row1);
+        addPresetBtn(row1, "Normal (Default)", Prefs.PRESET_NORMAL_EQ, 0, false, 0, true, -0.5f, 60);
+        addPresetBtn(row1, "Stereo Widening\n(Lite Joey)", Prefs.PRESET_STEREO_LITE_EQ, 1, true, 55, true, -0.3f, 250);
 
-        LinearLayout presetRow = new LinearLayout(this);
-        presetRow.setOrientation(LinearLayout.HORIZONTAL);
-        presetCard.addView(presetRow);
+        LinearLayout row2 = new LinearLayout(this);
+        row2.setOrientation(LinearLayout.HORIZONTAL);
+        row2.setPadding(0, 0, 0, dp(8));
+        presetCard.addView(row2);
+        addPresetBtn(row2, "Similar to Joey\nRetro Profile", Prefs.PRESET_SIMILAR_JOEY_EQ, 2, true, 40, true, -0.1f, 500);
+        addPresetBtn(row2, "Bass & Punch", Prefs.PRESET_BASS_PUNCH_EQ, 0, true, 35, true, -0.5f, 80);
 
-        addPresetBtn(presetRow, "Wide Stage", Prefs.PRESET_WIDE_EQ, 0, true, 70, true, -0.5f, 60);
-        addPresetBtn(presetRow, "Vocal Clear", Prefs.PRESET_VOCAL_EQ, 0, true, 45, true, -0.5f, 60);
-        addPresetBtn(presetRow, "Flat", Prefs.PRESET_FLAT_EQ, 0, false, 0, true, -0.5f, 60);
+        LinearLayout row3 = new LinearLayout(this);
+        row3.setOrientation(LinearLayout.HORIZONTAL);
+        presetCard.addView(row3);
+        addPresetBtn(row3, "Vocal & Dialogue", Prefs.PRESET_VOCAL_EQ, 0, true, 30, true, -0.5f, 60);
+        addPresetBtn(row3, "Crisp Retro", Prefs.PRESET_CRISP_RETRO_EQ, 0, true, 45, true, -0.5f, 60);
 
         // Stereo Stage Card
         LinearLayout stereoCard = makeCard(dp(12));
@@ -610,7 +606,7 @@ public final class MainActivity extends Activity {
         eqSwitch = addSwitchRow(
             eqCard,
             "Enable 19-Band Equalizer",
-            "Fine-tune 70 Hz to 16 kHz (-32.0 to +12.0 dB in 0.5 dB steps)",
+            "Fine-tune 70 Hz to 16 kHz (-12.0 to +12.0 dB in 0.5 dB steps)",
             Color.parseColor(TEXT_MUTED),
             prefs.isEqEnabled(),
             checked -> {
@@ -621,7 +617,7 @@ public final class MainActivity extends Activity {
         );
 
         makeupValueView = addSliderHeader(eqCard, "EQ Makeup Gain (Compensates Deep Cuts)", "+" + prefs.getEqMakeupDb() + " dB");
-        makeupSlider = createStyledSeekBar(20, prefs.getEqMakeupDb());
+        makeupSlider = createStyledSeekBar(12, prefs.getEqMakeupDb());
         makeupSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
@@ -951,7 +947,7 @@ public final class MainActivity extends Activity {
         b.setTextColor(Color.WHITE);
         b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         b.setBackground(makeRoundedBg(INNER_BG, 10, CARD_STROKE));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(38), 1f);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(52), 1f);
         lp.setMargins(dp(4), 0, dp(4), 0);
         b.setLayoutParams(lp);
         b.setOnClickListener(v -> loadPresetAndRefresh(bands, makeupDb, stereoOn, widthPct, limOn, limThresh, limRelMs));
