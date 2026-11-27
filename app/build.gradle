@@ -10,8 +10,8 @@ android {
         applicationId "com.thor.audiounlocker"
         minSdk 28
         targetSdk 34
-        versionCode 13
-        versionName "7.3.1"
+        versionCode 14
+        versionName "7.4.0"
     }
 
     signingConfigs {

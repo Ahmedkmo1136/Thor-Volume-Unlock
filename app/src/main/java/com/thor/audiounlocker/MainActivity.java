@@ -73,6 +73,7 @@ public final class MainActivity extends Activity {
     private Switch stereoWideSwitch;
     private TextView widthValueView;
     private SeekBar widthSlider;
+    private Switch mbcSwitch;
     private Switch limiterSwitch;
     private TextView limThreshValueView;
     private SeekBar limThreshSlider;
@@ -479,32 +480,36 @@ public final class MainActivity extends Activity {
         row1.setOrientation(LinearLayout.HORIZONTAL);
         row1.setPadding(0, 0, 0, dp(8));
         presetCard.addView(row1);
-        addPresetBtn(row1, Prefs.PROF_NORMAL, "Normal (Default)", Prefs.PRESET_NORMAL_EQ, 0, false, 0, true, -0.5f, 60);
-        addPresetBtn(row1, Prefs.PROF_LITER_JOEY, "Liter Joey\nRetro Profile", Prefs.PRESET_STEREO_LITE_EQ, 1, true, 55, true, -0.3f, 250);
+        addPresetBtn(row1, Prefs.PROF_NORMAL, "Normal (Default)", Prefs.PRESET_NORMAL_EQ, 0, false, false, 0, true, -1.5f, 60);
+        addPresetBtn(row1, Prefs.PROF_THOR_CLEAN_LOUD, "Thor Clean Loud\n(Recommended)", Prefs.PRESET_THOR_CLEAN_LOUD_EQ, 0, true, true, 60, true, -1.5f, 60);
 
         LinearLayout row2 = new LinearLayout(this);
         row2.setOrientation(LinearLayout.HORIZONTAL);
         row2.setPadding(0, 0, 0, dp(8));
         presetCard.addView(row2);
-        addPresetBtn(row2, Prefs.PROF_JOEY, "Joey Retro\nProfile", Prefs.PRESET_SIMILAR_JOEY_EQ, 2, true, 40, true, -0.1f, 500);
-        addPresetBtn(row2, Prefs.PROF_BASS, "Bass & Punch", Prefs.PRESET_BASS_PUNCH_EQ, 0, true, 35, true, -0.5f, 80);
+        addPresetBtn(row2, Prefs.PROF_LITER_JOEY, "Liter Joey\nRetro Profile", Prefs.PRESET_STEREO_LITE_EQ, 1, true, true, 55, true, -1.5f, 120);
+        addPresetBtn(row2, Prefs.PROF_JOEY, "Joey Retro\nProfile", Prefs.PRESET_SIMILAR_JOEY_EQ, 2, true, true, 40, true, -1.5f, 200);
 
         LinearLayout row3 = new LinearLayout(this);
         row3.setOrientation(LinearLayout.HORIZONTAL);
         row3.setPadding(0, 0, 0, dp(8));
         presetCard.addView(row3);
-        addPresetBtn(row3, Prefs.PROF_VOCAL, "Vocal & Dialogue", Prefs.PRESET_VOCAL_EQ, 0, true, 30, true, -0.5f, 60);
-        addPresetBtn(row3, Prefs.PROF_CRISP, "Crisp Retro", Prefs.PRESET_CRISP_RETRO_EQ, 0, true, 45, true, -0.5f, 60);
+        addPresetBtn(row3, Prefs.PROF_BASS, "Bass & Punch", Prefs.PRESET_BASS_PUNCH_EQ, 0, true, true, 35, true, -1.5f, 80);
+        addPresetBtn(row3, Prefs.PROF_VOCAL, "Vocal & Dialogue", Prefs.PRESET_VOCAL_EQ, 0, true, true, 30, true, -1.5f, 60);
+
+        LinearLayout row4 = new LinearLayout(this);
+        row4.setOrientation(LinearLayout.HORIZONTAL);
+        row4.setPadding(0, 0, 0, dp(8));
+        presetCard.addView(row4);
+        addPresetBtn(row4, Prefs.PROF_CRISP, "Crisp Retro", Prefs.PRESET_CRISP_RETRO_EQ, 0, true, true, 45, true, -1.5f, 60);
 
         // Custom Profile button (auto-selected when you modify any setting without reverting other values)
         Button customBtn = new Button(this);
-        customBtn.setText("Custom Profile (Auto-Saved)");
+        customBtn.setText("Custom Profile\n(Auto-Saved)");
         customBtn.setAllCaps(false);
         customBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         customBtn.setTypeface(null, Typeface.BOLD);
-        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(44)
-        );
+        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(0, dp(52), 1f);
         cLp.setMargins(dp(4), 0, dp(4), 0);
         customBtn.setLayoutParams(cLp);
         customBtn.setOnClickListener(v -> {
@@ -515,7 +520,7 @@ public final class MainActivity extends Activity {
                 pushServiceUpdateImmediate();
             }
         });
-        presetCard.addView(customBtn);
+        row4.addView(customBtn);
         profileButtons.put(Prefs.PROF_CUSTOM, customBtn);
         updateProfileHighlights();
 
@@ -533,7 +538,7 @@ public final class MainActivity extends Activity {
         stereoWideSwitch = addSwitchRow(
             stereoCard,
             "Enable Stereo Widener",
-            "Virtualizer + subtle L/R complementary EQ tilt for wider speakers",
+            "Phase-safe L/R PostEQ tilt (4 kHz - 16 kHz) for wide speakers with zero distortion",
             Color.parseColor(TEXT_MUTED),
             prefs.isStereoWideEnabled(),
             checked -> {
@@ -566,11 +571,25 @@ public final class MainActivity extends Activity {
         page.addView(limiterCard);
 
         TextView limiterTitle = new TextView(this);
-        limiterTitle.setText("Output Limiter");
+        limiterTitle.setText("Dynamics & Output Limiter");
         limiterTitle.setTextColor(Color.WHITE);
         limiterTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         limiterTitle.setTypeface(null, Typeface.BOLD);
         limiterCard.addView(limiterTitle);
+
+        mbcSwitch = addSwitchRow(
+            limiterCard,
+            "Enable 3-Band Compressor (MBC)",
+            "Boosts quiet details while taming bass hits so small speakers stay loud and clean",
+            Color.parseColor(TEXT_MUTED),
+            prefs.isMbcEnabled(),
+            checked -> {
+                if (syncingUi) return;
+                prefs.setMbcEnabled(checked);
+                markCustomProfile();
+                pushServiceUpdateImmediate();
+            }
+        );
 
         limiterSwitch = addSwitchRow(
             limiterCard,
@@ -963,6 +982,7 @@ public final class MainActivity extends Activity {
             if (stereoWideSwitch != null) stereoWideSwitch.setChecked(prefs.isStereoWideEnabled());
             if (widthSlider != null) widthSlider.setProgress(prefs.getStageWidthPercent());
             if (widthValueView != null) widthValueView.setText(prefs.getStageWidthPercent() + "%");
+            if (mbcSwitch != null) mbcSwitch.setChecked(prefs.isMbcEnabled());
             if (limiterSwitch != null) limiterSwitch.setChecked(prefs.isLimiterEnabled());
             if (limThreshSlider != null) limThreshSlider.setProgress(Math.round((prefs.getLimiterThresholdDb() + 6.0f) * 10f));
             if (limThreshValueView != null) limThreshValueView.setText(String.format(Locale.US, "%.1f dB", prefs.getLimiterThresholdDb()));
@@ -977,13 +997,14 @@ public final class MainActivity extends Activity {
         String profileId,
         float[] eqBands,
         int makeupDb,
+        boolean mbcOn,
         boolean stereoOn,
         int stageWidthPct,
         boolean limiterOn,
         float limiterThresholdDb,
         int limiterReleaseMs
     ) {
-        prefs.applyPresetTemplate(profileId, eqBands, makeupDb, stereoOn, stageWidthPct, limiterOn, limiterThresholdDb, limiterReleaseMs);
+        prefs.applyPresetTemplate(profileId, eqBands, makeupDb, mbcOn, stereoOn, stageWidthPct, limiterOn, limiterThresholdDb, limiterReleaseMs);
         refreshDspControlsFromPrefs();
         updateProfileHighlights();
         pushServiceUpdateImmediate();
@@ -995,6 +1016,7 @@ public final class MainActivity extends Activity {
         String label,
         float[] bands,
         int makeupDb,
+        boolean mbcOn,
         boolean stereoOn,
         int widthPct,
         boolean limOn,
@@ -1008,7 +1030,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(52), 1f);
         lp.setMargins(dp(4), 0, dp(4), 0);
         b.setLayoutParams(lp);
-        b.setOnClickListener(v -> loadPresetAndRefresh(profileId, bands, makeupDb, stereoOn, widthPct, limOn, limThresh, limRelMs));
+        b.setOnClickListener(v -> loadPresetAndRefresh(profileId, bands, makeupDb, mbcOn, stereoOn, widthPct, limOn, limThresh, limRelMs));
         row.addView(b);
         profileButtons.put(profileId, b);
     }

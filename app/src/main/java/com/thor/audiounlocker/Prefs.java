@@ -16,6 +16,7 @@ public final class Prefs {
     public static final String PROF_BASS = "bass";
     public static final String PROF_VOCAL = "vocal";
     public static final String PROF_CRISP = "crisp";
+    public static final String PROF_THOR_CLEAN_LOUD = "thor_clean_loud";
     public static final String PROF_CUSTOM = "custom";
 
     public static final int SAFE_MAX_DB = 10;
@@ -69,6 +70,12 @@ public final class Prefs {
     public static final float[] PRESET_CRISP_RETRO_EQ = {
         -3.0f, 2.0f, 2.0f, 1.5f, 1.0f, 0.5f, 0.0f, 0.0f, 0.5f,
         1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 3.5f, 3.5f, 4.0f, 3.0f, 2.0f
+    };
+
+    // 7. Thor Clean Loud (Loud, wide, zero-clipping curve tuned for AYN Thor speakers)
+    public static final float[] PRESET_THOR_CLEAN_LOUD_EQ = {
+        -6.0f, -3.0f, -1.5f, 1.5f, 2.0f, 0.0f, -1.0f, -0.5f, 0.5f,
+        1.5f, 2.5f, 3.0f, 2.5f, 1.0f, 0.0f, 1.5f, 2.0f, 1.5f, 1.0f
     };
 
     private static final String NAME = "thor_boost_prefs_v72";
@@ -224,6 +231,15 @@ public final class Prefs {
         sp.edit().putInt("stage_width_pct", clamped).apply();
     }
 
+    // --- Multiband Compressor (MBC) ---
+    public boolean isMbcEnabled() {
+        return sp.getBoolean("mbc_enabled", true);
+    }
+
+    public void setMbcEnabled(boolean v) {
+        sp.edit().putBoolean("mbc_enabled", v).apply();
+    }
+
     // --- Independent Output Limiter Settings ---
     public boolean isLimiterEnabled() {
         return sp.getBoolean("limiter_enabled", true);
@@ -234,7 +250,7 @@ public final class Prefs {
     }
 
     public float getLimiterThresholdDb() {
-        float val = sp.getFloat("limiter_threshold_db", -0.5f);
+        float val = sp.getFloat("limiter_threshold_db", -1.5f);
         return Math.max(-6.0f, Math.min(0.0f, val));
     }
 
@@ -272,6 +288,7 @@ public final class Prefs {
         }
         ed.putBoolean("custom_stereo_on", isStereoWideEnabled());
         ed.putInt("custom_stage_width", getStageWidthPercent());
+        ed.putBoolean("custom_mbc_on", isMbcEnabled());
         ed.putBoolean("custom_limiter_on", isLimiterEnabled());
         ed.putFloat("custom_limiter_thresh", getLimiterThresholdDb());
         ed.putInt("custom_limiter_rel", getLimiterReleaseMs());
@@ -292,6 +309,7 @@ public final class Prefs {
         }
         ed.putBoolean("stereo_wide_enabled", sp.getBoolean("custom_stereo_on", isStereoWideEnabled()));
         ed.putInt("stage_width_pct", sp.getInt("custom_stage_width", getStageWidthPercent()));
+        ed.putBoolean("mbc_enabled", sp.getBoolean("custom_mbc_on", isMbcEnabled()));
         ed.putBoolean("limiter_enabled", sp.getBoolean("custom_limiter_on", isLimiterEnabled()));
         ed.putFloat("limiter_threshold_db", sp.getFloat("custom_limiter_thresh", getLimiterThresholdDb()));
         ed.putInt("limiter_release_ms", sp.getInt("custom_limiter_rel", getLimiterReleaseMs()));
@@ -302,6 +320,7 @@ public final class Prefs {
         String profileId,
         float[] eqBands,
         int makeupDb,
+        boolean mbcOn,
         boolean stereoOn,
         int stageWidthPct,
         boolean limiterOn,
@@ -315,6 +334,7 @@ public final class Prefs {
         for (int i = 0; i < EQ_FREQS_HZ.length && i < eqBands.length; i++) {
             ed.putFloat("eq19_band_" + i, Math.max(EQ_MIN_DB, Math.min(EQ_MAX_DB, eqBands[i])));
         }
+        ed.putBoolean("mbc_enabled", mbcOn);
         ed.putBoolean("stereo_wide_enabled", stereoOn);
         ed.putInt("stage_width_pct", Math.max(0, Math.min(100, stageWidthPct)));
         ed.putBoolean("limiter_enabled", limiterOn);

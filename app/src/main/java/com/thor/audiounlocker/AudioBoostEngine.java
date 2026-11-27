@@ -6,7 +6,6 @@ import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.media.audiofx.DynamicsProcessing;
 import android.media.audiofx.LoudnessEnhancer;
-import android.media.audiofx.Virtualizer;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -16,17 +15,23 @@ public final class AudioBoostEngine {
         void onStatus(String statusLine, boolean active, boolean bypassed);
     }
 
+    private static final int PRE_EQ_BANDS = Prefs.EQ_FREQS_HZ.length;
+    private static final int MBC_BANDS = 3;
+    private static final int POST_EQ_BANDS = 4;
+    private static final float[] WIDENER_FREQS = { 4000f, 6300f, 10000f, 16000f };
+
     private final AudioManager audioManager;
     private final Prefs prefs;
     private final Listener listener;
 
     private DynamicsProcessing dp;
-    private Virtualizer virtualizer;
     private LoudnessEnhancer fallbackLe;
     private boolean callbackRegistered = false;
     private String currentForegroundPkg = null;
 
     // Track structural config of existing DynamicsProcessing to update in-place without audio pops
+    private boolean dpHasPreEq = false;
+    private boolean dpHasMbc = false;
     private boolean dpHasPostEq = false;
     private boolean dpHasLimiter = false;
     private String lastAppliedSignature = null;
@@ -103,6 +108,7 @@ public final class AudioBoostEngine {
 
         boolean eqOn = prefs.isEqEnabled();
         int makeupDb = eqOn ? prefs.getEqMakeupDb() : 0;
+        boolean mbcOn = prefs.isMbcEnabled();
         boolean wideOn = prefs.isStereoWideEnabled();
         int widthPct = prefs.getStageWidthPercent();
         boolean limiterOn = prefs.isLimiterEnabled();
@@ -112,10 +118,11 @@ public final class AudioBoostEngine {
         StringBuilder sigBuilder = new StringBuilder(128);
         sigBuilder.append("ON|").append(scopeLabel).append('|').append(gainDb).append('|')
             .append(eqOn).append('|').append(makeupDb).append('|')
+            .append(mbcOn).append('|')
             .append(wideOn).append('|').append(widthPct).append('|')
             .append(limiterOn).append('|').append(limiterThreshold).append('|').append(limiterRelease);
         if (eqOn) {
-            for (int i = 0; i < Prefs.EQ_FREQS_HZ.length; i++) {
+            for (int i = 0; i < PRE_EQ_BANDS; i++) {
                 sigBuilder.append('|').append(prefs.getEqBandDb(i));
             }
         }
@@ -125,21 +132,17 @@ public final class AudioBoostEngine {
         }
 
         boolean dpOk = applyDynamicsProcessing(
-            gainDb, makeupDb, eqOn, wideOn, widthPct, limiterOn, limiterThreshold, limiterRelease
+            gainDb, makeupDb, eqOn, mbcOn, wideOn, widthPct, limiterOn, limiterThreshold, limiterRelease
         );
-        if (wideOn && widthPct > 0) {
-            applyVirtualizer(widthPct);
-        } else {
-            releaseVirtualizer();
-        }
 
         if (dpOk) {
             releaseLoudnessEnhancer();
             lastAppliedSignature = sig;
             String eqTag = eqOn ? " • 19-Band EQ" : "";
-            String stageTag = wideOn ? (" • Stage " + widthPct + "%") : "";
+            String mbcTag = mbcOn ? " • MBC" : "";
+            String stageTag = (wideOn && widthPct > 0) ? (" • Stage " + widthPct + "%") : "";
             String limTag = limiterOn ? (" • Lim " + limiterRelease + "ms") : "";
-            notifyListener("[" + scopeLabel + "] +" + gainDb + " dB" + eqTag + stageTag + limTag, true, false);
+            notifyListener("[" + scopeLabel + "] +" + gainDb + " dB" + eqTag + mbcTag + stageTag + limTag, true, false);
         } else {
             boolean leOk = applyLoudnessEnhancer(gainDb * 100);
             if (leOk) {
@@ -156,6 +159,7 @@ public final class AudioBoostEngine {
         int gainDb,
         int makeupDb,
         boolean eqOn,
+        boolean mbcOn,
         boolean wideOn,
         int widthPct,
         boolean limiterOn,
@@ -163,38 +167,52 @@ public final class AudioBoostEngine {
         int limiterReleaseMs
     ) {
         try {
-            boolean useEq = eqOn || (wideOn && widthPct > 0);
-            int bandCount = Prefs.EQ_FREQS_HZ.length;
+            boolean usePostEq = wideOn && widthPct > 0;
 
-            // Keep user gain cleanly in InputGain, and apply EQ makeup directly to the EQ curve
-            // so deep midrange cuts (like Joey's -20 dB EQ) never drop overall loudness or hit HAL input-gain clamps.
-            float inputGain = (float) gainDb;
+            // Preamp headroom trim: subtract max positive PreEQ boost so PreEQ never clips into MBC/Limiter
             float eqShift = eqOn ? (float) makeupDb : 0.0f;
+            float maxPositiveBoost = 0.0f;
+            if (eqOn) {
+                for (int i = 0; i < PRE_EQ_BANDS; i++) {
+                    float bandTotal = prefs.getEqBandDb(i) + eqShift;
+                    if (bandTotal > maxPositiveBoost) {
+                        maxPositiveBoost = bandTotal;
+                    }
+                }
+            }
+            float inputGain = (float) gainDb - maxPositiveBoost;
 
-            if (dp == null || dpHasPostEq != useEq || dpHasLimiter != limiterOn) {
+            if (dp == null || dpHasPreEq != eqOn || dpHasMbc != mbcOn || dpHasPostEq != usePostEq || dpHasLimiter != limiterOn) {
                 releaseDynamicsProcessing();
                 DynamicsProcessing.Config.Builder b = new DynamicsProcessing.Config.Builder(
                     DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION,
                     2,
-                    useEq, useEq ? bandCount : 0,
-                    false, 0,
-                    false, 0,
+                    eqOn, eqOn ? PRE_EQ_BANDS : 0,
+                    mbcOn, mbcOn ? MBC_BANDS : 0,
+                    usePostEq, usePostEq ? POST_EQ_BANDS : 0,
                     limiterOn
                 );
                 b.setPreferredFrameDuration(10.0f);
                 b.setInputGainAllChannelsTo(inputGain);
 
-                if (useEq) {
-                    applyPreEqToBuilder(b, eqOn, eqShift, wideOn, widthPct, bandCount);
+                if (eqOn) {
+                    b.setPreEqAllChannelsTo(buildPreEq(eqShift));
+                }
+                if (mbcOn) {
+                    b.setMbcAllChannelsTo(buildMbc());
+                }
+                if (usePostEq) {
+                    b.setPostEqByChannelIndex(0, buildWidenerPostEq(widthPct, true));
+                    b.setPostEqByChannelIndex(1, buildWidenerPostEq(widthPct, false));
                 }
                 if (limiterOn) {
-                    b.setLimiterAllChannelsTo(new DynamicsProcessing.Limiter(
-                        true, true, 0, 1.0f, (float) limiterReleaseMs, 10.0f, limiterThresholdDb, 0.0f
-                    ));
+                    b.setLimiterAllChannelsTo(buildLimiter(limiterThresholdDb, limiterReleaseMs));
                 }
 
                 dp = new DynamicsProcessing(Integer.MAX_VALUE, 0, b.build());
-                dpHasPostEq = useEq;
+                dpHasPreEq = eqOn;
+                dpHasMbc = mbcOn;
+                dpHasPostEq = usePostEq;
                 dpHasLimiter = limiterOn;
                 dp.setEnabled(true);
                 return true;
@@ -202,18 +220,18 @@ public final class AudioBoostEngine {
 
             // Fast in-place parameter update (zero audio pop, zero native reallocation)
             dp.setInputGainAllChannelsTo(inputGain);
-            if (useEq) {
-                float tilt = (wideOn && widthPct > 0) ? (widthPct / 100.0f) * 2.0f : 0.0f;
-                DynamicsProcessing.Eq eqLeft = new DynamicsProcessing.Eq(true, true, bandCount);
-                DynamicsProcessing.Eq eqRight = new DynamicsProcessing.Eq(true, true, bandCount);
-                populateStereoEq(eqLeft, eqRight, eqOn, eqShift, tilt, bandCount);
-                dp.setPreEqByChannelIndex(0, eqLeft);
-                dp.setPreEqByChannelIndex(1, eqRight);
+            if (eqOn) {
+                dp.setPreEqAllChannelsTo(buildPreEq(eqShift));
+            }
+            if (mbcOn) {
+                dp.setMbcAllChannelsTo(buildMbc());
+            }
+            if (usePostEq) {
+                dp.setPostEqByChannelIndex(0, buildWidenerPostEq(widthPct, true));
+                dp.setPostEqByChannelIndex(1, buildWidenerPostEq(widthPct, false));
             }
             if (limiterOn) {
-                dp.setLimiterAllChannelsTo(new DynamicsProcessing.Limiter(
-                    true, true, 0, 1.0f, (float) limiterReleaseMs, 10.0f, limiterThresholdDb, 0.0f
-                ));
+                dp.setLimiterAllChannelsTo(buildLimiter(limiterThresholdDb, limiterReleaseMs));
             }
             if (!dp.getEnabled()) {
                 dp.setEnabled(true);
@@ -225,60 +243,45 @@ public final class AudioBoostEngine {
         }
     }
 
-    private void applyPreEqToBuilder(
-        DynamicsProcessing.Config.Builder b,
-        boolean eqOn,
-        float eqShift,
-        boolean wideOn,
-        int widthPct,
-        int bandCount
-    ) {
-        float tilt = (wideOn && widthPct > 0) ? (widthPct / 100.0f) * 2.0f : 0.0f;
-        DynamicsProcessing.Eq eqLeft = new DynamicsProcessing.Eq(true, true, bandCount);
-        DynamicsProcessing.Eq eqRight = new DynamicsProcessing.Eq(true, true, bandCount);
-        populateStereoEq(eqLeft, eqRight, eqOn, eqShift, tilt, bandCount);
-        b.setPreEqByChannelIndex(0, eqLeft);
-        b.setPreEqByChannelIndex(1, eqRight);
+    private DynamicsProcessing.Eq buildPreEq(float eqShift) {
+        DynamicsProcessing.Eq preEq = new DynamicsProcessing.Eq(true, true, PRE_EQ_BANDS);
+        for (int i = 0; i < PRE_EQ_BANDS; i++) {
+            float gain = clamp(prefs.getEqBandDb(i) + eqShift, -32f, 15f);
+            preEq.setBand(i, new DynamicsProcessing.EqBand(true, Prefs.EQ_FREQS_HZ[i], gain));
+        }
+        return preEq;
     }
 
-    private void populateStereoEq(
-        DynamicsProcessing.Eq eqLeft,
-        DynamicsProcessing.Eq eqRight,
-        boolean eqOn,
-        float eqShift,
-        float tilt,
-        int bandCount
-    ) {
-        for (int i = 0; i < bandCount; i++) {
-            float freq = Prefs.EQ_FREQS_HZ[i];
-            float base = eqOn ? (prefs.getEqBandDb(i) + eqShift) : 0.0f;
-            float leftOffset = 0.0f;
-            if (freq >= 850f && freq <= 1860f) leftOffset = +tilt * 0.75f;
-            else if (freq >= 2800f && freq <= 5000f) leftOffset = -tilt * 0.75f;
-            else if (freq >= 9050f) leftOffset = +tilt * 0.75f;
-
-            eqLeft.setBand(i, new DynamicsProcessing.EqBand(true, freq, clamp(base + leftOffset, -32f, 15f)));
-            eqRight.setBand(i, new DynamicsProcessing.EqBand(true, freq, clamp(base - leftOffset, -32f, 15f)));
-        }
+    private DynamicsProcessing.Mbc buildMbc() {
+        DynamicsProcessing.Mbc mbc = new DynamicsProcessing.Mbc(true, true, MBC_BANDS);
+        // Band 0: Low (0 - 250 Hz) -> controls bass excursion so small speakers don't rattle
+        mbc.setBand(0, new DynamicsProcessing.MbcBand(
+            true, 250f, 10f, 80f, 3.5f, -14f, 4f, -80f, 1.0f, 0f, 2.0f));
+        // Band 1: Mid (250 Hz - 4 kHz) -> lifts quiet dialogue, retro synth, and SFX
+        mbc.setBand(1, new DynamicsProcessing.MbcBand(
+            true, 4000f, 15f, 100f, 2.5f, -18f, 4f, -80f, 1.0f, 0f, 4.0f));
+        // Band 2: High (4 kHz - 20 kHz) -> adds air/presence without harsh sibilance
+        mbc.setBand(2, new DynamicsProcessing.MbcBand(
+            true, 20000f, 5f, 60f, 2.5f, -16f, 4f, -80f, 1.0f, 0f, 3.0f));
+        return mbc;
     }
 
-    private boolean applyVirtualizer(int widthPct) {
-        try {
-            if (virtualizer == null) {
-                virtualizer = new Virtualizer(Integer.MAX_VALUE, 0);
-            }
-            if (virtualizer.getStrengthSupported()) {
-                short strength = (short) Math.max(0, Math.min(1000, widthPct * 10));
-                virtualizer.setStrength(strength);
-            }
-            if (!virtualizer.getEnabled()) {
-                virtualizer.setEnabled(true);
-            }
-            return true;
-        } catch (Throwable ignored) {
-            releaseVirtualizer();
-            return false;
+    private DynamicsProcessing.Eq buildWidenerPostEq(int widthPct, boolean isLeft) {
+        float clampedWiden = Math.max(0f, Math.min(100f, (float) widthPct)) / 100f;
+        float maxTiltDb = 2.5f * clampedWiden;
+        DynamicsProcessing.Eq postEq = new DynamicsProcessing.Eq(true, true, POST_EQ_BANDS);
+        for (int i = 0; i < POST_EQ_BANDS; i++) {
+            float sign = (i % 2 == 0) ? 1f : -1f;
+            if (!isLeft) sign = -sign;
+            postEq.setBand(i, new DynamicsProcessing.EqBand(true, WIDENER_FREQS[i], sign * maxTiltDb));
         }
+        return postEq;
+    }
+
+    private DynamicsProcessing.Limiter buildLimiter(float thresholdDb, int releaseMs) {
+        return new DynamicsProcessing.Limiter(
+            true, true, 0, 1.0f, (float) releaseMs, 15.0f, thresholdDb, 0.0f
+        );
     }
 
     private boolean applyLoudnessEnhancer(int targetMb) {
@@ -331,7 +334,6 @@ public final class AudioBoostEngine {
 
     private void releaseAll() {
         releaseDynamicsProcessing();
-        releaseVirtualizer();
         releaseLoudnessEnhancer();
     }
 
@@ -344,19 +346,10 @@ public final class AudioBoostEngine {
             }
             dp = null;
         }
+        dpHasPreEq = false;
+        dpHasMbc = false;
         dpHasPostEq = false;
         dpHasLimiter = false;
-    }
-
-    private void releaseVirtualizer() {
-        if (virtualizer != null) {
-            try {
-                virtualizer.setEnabled(false);
-                virtualizer.release();
-            } catch (Throwable ignored) {
-            }
-            virtualizer = null;
-        }
     }
 
     private void releaseLoudnessEnhancer() {
